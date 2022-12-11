@@ -6,6 +6,8 @@ thickness, Scd and cholesterol tilt angle
 '''
 
 from pathlib import Path, PosixPath
+from concurrent.futures import ProcessPoolExecutor, as_completed
+from typing import Callable
 import argparse
 import os
 import sys
@@ -30,19 +32,33 @@ def opener(inp: PosixPath) -> list[str]:
     return lines
 
 
-@dataclass
+def multiproc(func: Callable, data: list, n_workers: int) -> dict:
+    '''
+    wrapper for ProcessPoolExecutor,
+    gets function, list of arguments and max n of workers,
+    gives dictionary {arguments: results}
+    '''
+    result = {}
+
+    with ProcessPoolExecutor(max_workers=n_workers) as executor:
+        future_to_addr = {executor.submit(func, i): i
+                          for i in data}
+        for f in as_completed(future_to_addr.keys()):
+            result[future_to_addr[f]] = f.result()
+
+    return result
+
+
+@dataclass(frozen=True, unsafe_hash=True)
 class System:
     '''
     stores system name and path
     '''
     path: PosixPath  # directory containing system directory
     name: str
-    dir: str
 
-    def __init__(self, path, name):
-        self.path = path
-        self.name = name
-        self.dir = str(path / name)
+    def __post_init__(self):
+        object.__setattr__(self, 'dir', str(self.path / self.name))
 
     def __repr__(self):
         return f'System({self.name})'
@@ -73,7 +89,7 @@ class System:
         return [i.upper() if not i == 'chol' else 'CHL' for i in no_numbers.split('_')]
 
 
-@dataclass
+@dataclass(frozen=True, unsafe_hash=True)
 class TrajectorySlice:
     '''
     stores beginnig (b), ending (e) timepoints (in ns)
@@ -360,22 +376,26 @@ def main():
     if args.obtain_arperlip:
         arperlips = []
 
-    for syst in systems:
-        trj_slice = TrajectorySlice(System(path, syst), args.b, args.e, args.dt)
-        if args.obtain_densities:
-            get_densities(trj_slice)
-        if args.obtain_thickness:
-            th = calculate_thickness(trj_slice)
-            thicknesses.append((syst, np.mean(th), np.std(th)))
-        if args.obtain_arperlip:
-            arpl = calculate_area_per_lipid(trj_slice)
-            arperlips.append((syst, np.mean(arpl), np.std(arpl)))
+    trj_slices = [TrajectorySlice(System(path, s), args.b, args.e, args.dt) for s in systems]
+
+    if args.obtain_densities:
+        with ProcessPoolExecutor(max_workers=8) as executor:
+            executor.map(get_densities, trj_slices)
+
+    if args.obtain_thickness:
+        for trj, th in multiproc(calculate_thickness, trj_slices, 8).items():
+            thicknesses.append((trj.system.name, np.mean(th), np.std(th)))
+
+    if args.obtain_arperlip:
+        for trj, arpl in multiproc(calculate_area_per_lipid, trj_slices, 8).items():
+            arperlips.append((trj.system.name, np.mean(arpl), np.std(arpl)))
 
     if args.obtain_thickness:
         print('saving thickness...')
         thick_df = pd.DataFrame.from_records(
             thicknesses, columns=['system', 'mean', 'std'])
-        thick_df.to_csv(path / 'notebooks' / 'thickness' / 'new_thickness.csv', index=False)
+        thick_df.to_csv(path / 'notebooks' / 'thickness' /
+                        'new_thickness.csv', index=False)
         print('done.')
 
     if args.obtain_arperlip:
@@ -384,7 +404,7 @@ def main():
             arperlips, columns=['system', 'mean', 'std'])
         arperlip_df.to_csv(path / 'notebooks' /
                            'area_per_lipid' / 'new_arperlip.csv', index=False)
-        print('done')
+        print('done.')
 
 
 if __name__ == '__main__':
