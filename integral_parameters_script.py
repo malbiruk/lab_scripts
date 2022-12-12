@@ -32,19 +32,18 @@ def opener(inp: PosixPath) -> list[str]:
     return lines
 
 
-def multiproc(func: Callable, data: list, n_workers: int) -> dict:
+def multiproc(func: Callable, data: list, n_workers: int = 8) -> dict:
     '''
     wrapper for ProcessPoolExecutor,
-    gets function, list of arguments and max n of workers,
+    gets function, list of arguments (single argument) and max n of workers,
     gives dictionary {arguments: results}
     '''
     result = {}
 
     with ProcessPoolExecutor(max_workers=n_workers) as executor:
-        future_to_addr = {executor.submit(func, i): i
-                          for i in data}
-        for f in as_completed(future_to_addr.keys()):
-            result[future_to_addr[f]] = f.result()
+        futures = {executor.submit(func, i): i for i in data}
+        for f in as_completed(futures.keys()):
+            result[futures[f]] = f.result()
 
     return result
 
@@ -310,6 +309,70 @@ def calculate_thickness(trj: TrajectorySlice) -> list[float]:
     return thickness
 
 
+def lists_of_values_to_df(func: Callable, trj_slices: list[TrajectorySlice]) -> pd.DataFrame:
+    '''
+    func: function such as calculate_thickness or calculate_arperlip,
+          which takes trj_slices as input and gives list of floats as output
+
+    this function calculates mean and std for each TrajectorySlice and
+    creates dataframe with columns system, mean, std
+    '''
+    records = []
+    for trj, i in multiproc(func, trj_slices, 8).items():
+        records.append((trj.system.name, np.mean(i), np.std(i)))
+    return pd.DataFrame.from_records(
+        records, columns=['system', 'mean', 'std'])
+
+
+def calculate_distances_between_density_groups(
+        grp1: str, grp2: str, trj: TrajectorySlice) -> list[float]:
+    '''
+    calculates distances between density groups in each step of trajectory part
+    using densities of corresponding groups
+    '''
+    groups = ['chols', 'chols_o', 'acyl_chains', 'phosphates', 'water']
+    if grp1 not in groups or grp2 not in groups:
+        raise ValueError(f"invalid groups: '{grp1}' '{grp2}'."
+                         " only 'chols', 'chols_o', 'acyl_chains', 'phosphates', 'water' "
+                         'groups are supported')
+    distances = []
+    for fr in range(trj.b, trj.e, int(trj.dt / 1000)):
+        df1 = pd.read_csv(f'{trj.system.dir}/density_profiles/{grp1}_{fr}-{fr}-0_dp.xvg',
+                          header=None, delim_whitespace=True)
+        df2 = pd.read_csv(f'{trj.system.dir}/density_profiles/{grp2}_{fr}-{fr}-0_dp.xvg',
+                          header=None, delim_whitespace=True)
+        x, y1, y2 = df1[0], df1[1], df2[1]
+        x_y_spline1, x_y_spline2 = make_interp_spline(
+            x, y1),  make_interp_spline(x, y2)
+        x_ = np.linspace(x.min(), x.max(), 500)
+
+        grps = dict(
+            grp1_com_pos=calc_1d_com(x_[x_ > 0], x_y_spline1(x_[x_ > 0])),
+            grp2_com_pos=calc_1d_com(x_[x_ > 0], x_y_spline2(x_[x_ > 0])),
+            grp1_com_neg=calc_1d_com(x_[x_ < 0], x_y_spline1(x_[x_ < 0])),
+            grp2_com_neg=calc_1d_com(x_[x_ < 0], x_y_spline2(x_[x_ < 0])))
+
+        distances.append(grps['grp2_com_pos'] - grps['grp1_com_pos'])
+        distances.append(grps['grp1_com_neg'] - grps['grp2_com_neg'])
+    return distances
+
+
+def chols_p_dist(trj_slices: list[TrajectorySlice]) -> list[float]:
+    '''
+    wrapper for calculate_distances_between_density_groups
+    to get only 1 argument for using with multiproc()
+    '''
+    return calculate_distances_between_density_groups('chols', 'phosphates', trj_slices)
+
+
+def chols_o_p_dist(trj_slices: list[TrajectorySlice]) -> list[float]:
+    '''
+    wrapper for calculate_distances_between_density_groups
+    to get only 1 argument for using with multiproc()
+    '''
+    return calculate_distances_between_density_groups('chols_o', 'phosphates', trj_slices)
+
+
 def calculate_area_per_lipid(trj: TrajectorySlice) -> list[float]:
     '''
     calculates area per lipid in each step of trajectory
@@ -473,25 +536,24 @@ def integral_summary(infile: PosixPath,
             df2[f'chol{i} change (%) std'] = np.sqrt(np.abs(
                 (df[f'std_chol{i}']**2 * df['mean']**2
                  - df['std']**2 * df[f'mean_chol{i}']**2) / df['mean']**4)) * 100
-        df2.to_csv(str(infile).split('.')[0] + '_relative_changes.csv')
+        df2.to_csv(str(infile).split('.', maxsplit=1)
+                   [0] + '_relative_changes.csv')
     move_chol_rows_to_new_columns(infile, outfile, index)
-    calculate_relative_changes(
-        outfile, 1) if index is None else calculate_relative_changes(outfile, len(index))
+    if index is None:
+        calculate_relative_changes(outfile, 1)
+    else:
+        calculate_relative_changes(outfile, len(index))
 
 # TODO: plotting: dp, scd
 # TODO: plotting: integral
-# TODO: com - phosphates, o - phosphates, peak width
+# TODO: peak width
 # TODO: angles, angles + densities (horizontal component percentage)
 
 
-@ sparkles
-@ duration
-def main():
+def parse_args():
     '''
-    parse arguments and obtain and plot system parameters such as
-    density profiles, area per lipid,thickness, Scd and cholesterol tilt angle
+    arguments parser
     '''
-
     parser = argparse.ArgumentParser(
         description='Script to obtain integral parameters')
     parser.add_argument('--obtain_densities',
@@ -508,8 +570,12 @@ def main():
                         help='obtain scd data')
     parser.add_argument('--integral_summary',
                         action='store_true',
-                        help='generate summary tables as well as relative value changes '
+                        help='generate summary tables as well as relative value changes'
                         'for integral parameters')
+    parser.add_argument('--chl_p_distances',
+                        action='store_true',
+                        help='calculate distances between chl COMs and phosphates'
+                        'and between chl_o and phosphates')
     parser.add_argument('--dt', type=int, default=1000,
                         help='dt in ps')
     parser.add_argument('--b', type=int, default=150,
@@ -520,26 +586,34 @@ def main():
     if len(sys.argv) < 2:
         parser.print_usage()
 
-    args = parser.parse_args()
+    return parser.parse_args()
+
+
+@ sparkles
+@ duration
+def main():
+    '''
+    parse arguments and obtain and plot system parameters such as
+    density profiles, area per lipid,thickness, Scd and cholesterol tilt angle
+    '''
 
     plt.style.use('seaborn-talk')
-
+    args = parse_args()
     path = Path('/home/klim/Documents/chol_impact/')
-
     experiments = {
         'chain length': ('dmpc', 'dppc_325', 'dspc'),
         'chain saturation': ('dppc_325', 'popc', 'dopc'),
-        'head polarity': ('dopc', 'dopc_dops30', 'dopc_dops50', 'dops'),
+        'head polarity': ('dopc', 'dopc_dops50', 'dops'),
     }
-
     systems = flatten([(i, i + '_chol10', i + '_chol30', i + '_chol50')
                        for i in flatten(experiments.values())])
-
     systems.remove('dopc_dops50_chol50')
     systems.remove('dopc_dops50')
 
     trj_slices = [TrajectorySlice(
         System(path, s), args.b, args.e, args.dt) for s in systems]
+    trj_slices_chol = [TrajectorySlice(
+        System(path, s), args.b, args.e, args.dt) for s in systems if 'chol' in s]
 
     if args.obtain_densities:
         print('obtain all densities')
@@ -547,55 +621,52 @@ def main():
             executor.map(get_densities, trj_slices)
 
     if args.obtain_thickness:
-        thicknesses = []
-        for trj, th in multiproc(calculate_thickness, trj_slices, 8).items():
-            thicknesses.append((trj.system.name, np.mean(th), np.std(th)))
-        print('saving thickness...')
-        thick_df = pd.DataFrame.from_records(
-            thicknesses, columns=['system', 'mean', 'std'])
-        thick_df.to_csv(path / 'notebooks' / 'thickness' /
-                        'new_thickness.csv', index=False)
+        print('obtaining thicknesses...')
+        lists_of_values_to_df(calculate_thickness, trj_slices).to_csv(
+            path / 'notebooks' / 'thickness' / 'new_thickness.csv', index=False)
         print('done.')
 
     if args.obtain_arperlip:
-        arperlips = []
-        for trj, arpl in multiproc(calculate_area_per_lipid, trj_slices, 8).items():
-            arperlips.append((trj.system.name, np.mean(arpl), np.std(arpl)))
-        print('saving area per lipid...')
-        arperlip_df = pd.DataFrame.from_records(
-            arperlips, columns=['system', 'mean', 'std'])
-        arperlip_df.to_csv(path / 'notebooks' /
-                           'area_per_lipid' / 'new_arperlip.csv', index=False)
+        print('obtaining area per lipid...')
+        lists_of_values_to_df(calculate_area_per_lipid, trj_slices).to_csv(
+            path / 'notebooks' / 'area_per_lipid' / 'new_arperlip.csv', index=False)
         print('done.')
 
     if args.obtain_scd:
-        print('obtain all scd')
+        print('obtaining all scds...')
         with ProcessPoolExecutor(max_workers=8) as executor:
             executor.map(calculate_scd, trj_slices)
         print('saving scd...')
         scd_summary(trj_slices)
         print('done.')
 
+    if args.chl_p_distances:
+        print('obtaining chol-phosphates distances...')
+        lists_of_values_to_df(chols_p_dist, trj_slices_chol).to_csv(
+            path / 'notebooks' / 'chl_p_distances' / 'chols_phosphates_distances.csv', index=False)
+        print('obtaining chol_o-phosphates distances...')
+        lists_of_values_to_df(chols_o_p_dist, trj_slices_chol).to_csv(
+            path / 'notebooks' / 'chl_p_distances' / 'chols_o_phosphates_distances.csv',
+            index=False)
+        print('done.')
+
     if args.integral_summary:
         print('reformatting integral parameters...')
-        integral_summary(
-            path / 'notebooks' / 'thickness' / 'new_thickness.csv',
-            path / 'notebooks' / 'integral_parameters' / 'thickness.csv'
-        )
-        integral_summary(
-            path / 'notebooks' / 'area_per_lipid' / 'new_arperlip.csv',
-            path / 'notebooks' / 'integral_parameters' / 'arperlip.csv'
-        )
-        integral_summary(
-            path / 'notebooks' / 'scd' / 'res' / 'scd_chains.csv',
-            path / 'notebooks' / 'integral_parameters' / 'scd_chains.csv',
-            ['system', 'chain']
-        )
-        integral_summary(
-            path / 'notebooks' / 'scd' / 'res' / 'scd_atoms.csv',
-            path / 'notebooks' / 'integral_parameters' / 'scd_atoms.csv',
-            ['system', 'atom']
-        )
+        infiles = (path / 'notebooks' / 'thickness' / 'new_thickness.csv',
+                   path / 'notebooks' / 'area_per_lipid' / 'new_arperlip.csv',
+                   path / 'notebooks' / 'scd' / 'res' / 'scd_chains.csv',
+                   path / 'notebooks' / 'scd' / 'res' / 'scd_atoms.csv',
+                   path / 'notebooks' / 'chl_p_distances' / 'chols_phosphates_distances.csv',
+                   path / 'notebooks' / 'chl_p_distances' / 'chols_o_phosphates_distances.csv')
+        outfiles = (path / 'notebooks' / 'integral_parameters' / 'thickness.csv',
+                    path / 'notebooks' / 'integral_parameters' / 'arperlip.csv',
+                    path / 'notebooks' / 'integral_parameters' / 'scd_chains.csv',
+                    path / 'notebooks' / 'integral_parameters' / 'scd_atoms.csv',
+                    path / 'notebooks' / 'integral_parameters' / 'chols_phosphates_distances.csv',
+                    path / 'notebooks' / 'integral_parameters' / 'chols_o_phosphates_distances.csv')
+        indexes = (None, None, ['system', 'chain'],
+                   ['system', 'atom'], None, None)
+        list(map(integral_summary, infiles, outfiles, indexes))
         print('done.')
 
 
