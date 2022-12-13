@@ -291,12 +291,13 @@ def calculate_thickness(trj: TrajectorySlice) -> list[float]:
     '''
     calculates thickness in each step of trajectory part using phosphates densities
     '''
-    thickness = []
+
     trj_list = [TrajectorySlice(trj.system, fr, fr, 0)
                 for fr in range(trj.b, trj.e, int(trj.dt / 1000))]
     with ThreadPoolExecutor(max_workers=8) as executor:
         executor.map(get_densities, trj_list)
 
+    thickness = []
     for fr in range(trj.b, trj.e, int(trj.dt / 1000)):
         df = pd.read_csv(f'{trj.system.dir}/density_profiles/phosphates_{fr}-{fr}-0_dp.xvg',
                          header=None, delim_whitespace=True)
@@ -332,7 +333,7 @@ def calculate_distances_between_density_groups(
     '''
     groups = ['chols', 'chols_o', 'acyl_chains', 'phosphates', 'water']
     if grp1 not in groups or grp2 not in groups:
-        raise ValueError(f"invalid groups: '{grp1}' '{grp2}'."
+        raise ValueError(f"invalid groups: '{grp1}' '{grp2}',"
                          " only 'chols', 'chols_o', 'acyl_chains', 'phosphates', 'water' "
                          'groups are supported')
     distances = []
@@ -357,20 +358,82 @@ def calculate_distances_between_density_groups(
     return distances
 
 
-def chols_p_dist(trj_slices: list[TrajectorySlice]) -> list[float]:
+def calculate_density_peak_widths(grp: str, trj: TrajectorySlice) -> list[float]:
+    '''
+    peak width of density is calculated by
+    obtaining x value of yCOM
+    after that, minimum value ymin between x=0 and that x is found
+    then we are finding y value in the center ymin and yCOM
+    and finding peak width aka difference between x values where
+    density profile is intersecting this y
+    '''
+    def calc_single_peak_width(x: np.ndarray, spline: Callable) -> float:
+        '''
+        calculate single peak width
+        '''
+        y = spline(x)
+        xcom = calc_1d_com(x, y)
+        ycom = spline(xcom)
+        x, y = np.abs(x), np.abs(y)
+        for i in (x, y, np.array(xcom), np.array(ycom)):
+            np.abs(i, out=i)
+
+        y_middle = np.mean([ycom, np.min(y[x < xcom])])
+        res = x[np.isclose(np.array([y_middle for _ in y]), y, rtol=.07)]
+        if len(res) >= 2:
+            return res[np.argmax(np.diff(res))+1] - res[np.argmax(np.diff(res))]
+        raise IndexError(
+            f'length of array should be equal 2, got {len(res)}')
+
+
+    if grp not in ['chols', 'chols_o', 'acyl_chains', 'phosphates', 'water']:
+        raise ValueError(f"invalid group '{grp}',"
+                         " only 'chols', 'chols_o', 'acyl_chains', 'phosphates', 'water' "
+                         'groups are supported')
+
+    peak_widths = []
+    for fr in range(trj.b, trj.e, int(trj.dt / 1000)):
+        df = pd.read_csv(f'{trj.system.dir}/density_profiles/{grp}_{fr}-{fr}-0_dp.xvg',
+                         header=None, delim_whitespace=True)
+        if grp == 'chols':
+            df[1] = df.iloc[:, 1:].sum(axis=1)
+            df = df.iloc[:, :2]
+        x, y = df[0], df[1]
+        x_y_spline = make_interp_spline(x, y)
+        x_ = np.linspace(x.min(), x.max(), 500)
+        try:
+            peak_widths.append(calc_single_peak_width(x_[x_ > 0], x_y_spline))
+            peak_widths.append(calc_single_peak_width(x_[x_ < 0], x_y_spline))
+
+        # FIXME: errors are occuring :c
+        except ValueError as e:
+            print(trj.system.name, fr)
+            print(e)
+    return peak_widths
+
+
+def density_peak_widths_chols(trj: TrajectorySlice) -> list[float]:
+    '''
+    wrapper for calculate_density_width
+    to get only 1 argument for using with multiproc()
+    '''
+    return calculate_density_peak_widths('chols', trj)
+
+
+def chols_p_dist(trj: TrajectorySlice) -> list[float]:
     '''
     wrapper for calculate_distances_between_density_groups
     to get only 1 argument for using with multiproc()
     '''
-    return calculate_distances_between_density_groups('chols', 'phosphates', trj_slices)
+    return calculate_distances_between_density_groups('chols', 'phosphates', trj)
 
 
-def chols_o_p_dist(trj_slices: list[TrajectorySlice]) -> list[float]:
+def chols_o_p_dist(trj: TrajectorySlice) -> list[float]:
     '''
     wrapper for calculate_distances_between_density_groups
     to get only 1 argument for using with multiproc()
     '''
-    return calculate_distances_between_density_groups('chols_o', 'phosphates', trj_slices)
+    return calculate_distances_between_density_groups('chols_o', 'phosphates', trj)
 
 
 def calculate_area_per_lipid(trj: TrajectorySlice) -> list[float]:
@@ -524,6 +587,7 @@ def integral_summary(infile: PosixPath,
 
         df_concat.to_csv(outfile)
 
+
     def calculate_relative_changes(infile: PosixPath, n_of_index_cols: int = 1) -> None:
         '''
         calculate relative changes for parameters and save them as new file in the same directory
@@ -546,7 +610,6 @@ def integral_summary(infile: PosixPath,
 
 # TODO: plotting: dp, scd
 # TODO: plotting: integral
-# TODO: peak width
 # TODO: angles, angles + densities (horizontal component percentage)
 
 
@@ -574,7 +637,11 @@ def parse_args():
                         'for integral parameters')
     parser.add_argument('--chl_p_distances',
                         action='store_true',
-                        help='calculate distances between chl COMs and phosphates'
+                        help='calculate distances between chols COMs and phosphates'
+                        'and between chl_o and phosphates')
+    parser.add_argument('--chl_peak_width',
+                        action='store_true',
+                        help='calculate peak width of chols densities'
                         'and between chl_o and phosphates')
     parser.add_argument('--dt', type=int, default=1000,
                         help='dt in ps')
@@ -650,6 +717,13 @@ def main():
             index=False)
         print('done.')
 
+    if args.chl_peak_width:
+        print('obtaining chols peak widths...')
+        lists_of_values_to_df(density_peak_widths_chols, trj_slices_chol).to_csv(
+            path / 'notebooks' / 'chl_peak_widths' / 'chols_peak_widths.csv', index=False)
+        print('done.')
+
+
     if args.integral_summary:
         print('reformatting integral parameters...')
         infiles = (path / 'notebooks' / 'thickness' / 'new_thickness.csv',
@@ -657,15 +731,17 @@ def main():
                    path / 'notebooks' / 'scd' / 'res' / 'scd_chains.csv',
                    path / 'notebooks' / 'scd' / 'res' / 'scd_atoms.csv',
                    path / 'notebooks' / 'chl_p_distances' / 'chols_phosphates_distances.csv',
-                   path / 'notebooks' / 'chl_p_distances' / 'chols_o_phosphates_distances.csv')
+                   path / 'notebooks' / 'chl_p_distances' / 'chols_o_phosphates_distances.csv',
+                   path / 'notebooks' / 'chl_peak_widths' / 'chols_peak_widths.csv')
         outfiles = (path / 'notebooks' / 'integral_parameters' / 'thickness.csv',
                     path / 'notebooks' / 'integral_parameters' / 'arperlip.csv',
                     path / 'notebooks' / 'integral_parameters' / 'scd_chains.csv',
                     path / 'notebooks' / 'integral_parameters' / 'scd_atoms.csv',
                     path / 'notebooks' / 'integral_parameters' / 'chols_phosphates_distances.csv',
-                    path / 'notebooks' / 'integral_parameters' / 'chols_o_phosphates_distances.csv')
+                    path / 'notebooks' / 'integral_parameters' / 'chols_o_phosphates_distances.csv',
+                    path / 'notebooks' / 'integral_parameters' / 'chols_peak_widths.csv')
         indexes = (None, None, ['system', 'chain'],
-                   ['system', 'atom'], None, None)
+                   ['system', 'atom'], None, None, None)
         list(map(integral_summary, infiles, outfiles, indexes))
         print('done.')
 
