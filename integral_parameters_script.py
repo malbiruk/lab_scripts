@@ -15,8 +15,11 @@ from dataclasses import dataclass, field
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
+import seaborn as sns
 from matplotlib import axes
 from scipy.interpolate import make_interp_spline
+import scipy.integrate as integrate
+from scipy.optimize import curve_fit
 import MDAnalysis as mda
 from MDAnalysis.selections.gromacs import SelectionWriter
 
@@ -133,8 +136,8 @@ def get_chl_tilt(trj: TrajectorySlice) -> None:
 
     print('calculating 👨‍💻 cholesterol 🫀 tilt 📐 ...')
 
-    cmd = ['source `ls -t /usr/local/gromacs*/bin/GMXRC | head -n 1 `',
-           f'gmx bundle -s {trj.system.dir}/md/md.tpr',
+    cmd = ['source `ls -t /usr/local/gromacs*/bin/GMXRC | head -n 1 ` && ',
+           f'echo 0 1 | gmx bundle -s {trj.system.dir}/md/md.tpr',
            f'-f {trj.system.dir}/md/pbcmol.xtc',
            f'-na {n_chol} -z -n {trj.system.dir}/ch3_ch17.ndx',
            f'-b {trj.b*1000} -e {trj.e * 1000} -dt {trj.dt}',
@@ -144,6 +147,69 @@ def get_chl_tilt(trj: TrajectorySlice) -> None:
 
     os.popen(' '.join(cmd)).read()
     print('done ✅\n')
+
+
+def break_tilt_into_components(ax: axes._subplots.Axes, trj: TrajectorySlice) -> None:
+    '''
+    break and plot tilt components for one trj slice
+    '''
+    lines = opener(f'{trj.system.path}/notebooks/chol_tilt/'
+                   f'{trj.system.name}_{trj.b}-{trj.e}-{trj.dt}_tilt.xvg')
+
+    a = np.array(
+        list(map(float, flatten([i.split()[1:] for i in lines])))) - 90
+
+    def func(x, *params):
+        y = np.zeros_like(x)
+        for i in range(0, len(params), 3):
+            ctr = params[i]
+            amp = params[i + 1]
+            wid = params[i + 2]
+            y = y + amp * np.exp(-((x - ctr) / wid)**2)
+        return y
+
+    x = np.arange(np.min(a), np.max(a),
+                  (np.max(a) - np.min(a)) / 500)
+    my_kde = sns.kdeplot(a,
+                         ax=ax,
+                         # fill=False,
+                         lw=0,
+                         color='black',
+                         # element='poly',
+                         # stat='density',
+                         bw_adjust=0.4,
+                         cut=0
+                         )
+    line = my_kde.lines[0]
+    x, y = line.get_data()
+
+    guess = [-20, 0.005, 28, -6, 0.03, 4.5, 6, 0.03, 4.5, 24, 0.005, 28]
+    popt, _ = curve_fit(func, x, y, p0=guess)
+    df = pd.DataFrame(popt.reshape(int(len(guess) / 3), 3),
+                      columns=['ctr', 'amp', 'wid'])
+    df['area'] = df.apply(lambda row: integrate.quad(func, np.min(
+        x), np.max(x), args=(row['ctr'], row['amp'], row['wid']))[0], axis=1)
+    df.to_csv(
+        f'{trj.system.path}/notebooks/chol_tilt/'
+        f'{trj.system.name}_{trj.b}-{trj.e}-{trj.dt}_4_comps.csv', index=False)
+
+    fit = func(x, *popt)
+
+    sns.histplot(a,
+                 # fill=False,
+                 ax=ax,
+                 lw=0,
+                 element='poly',
+                 stat='density',
+                 alpha=0.2,
+                 edgecolor='black'
+                 )
+
+    ax.plot(x, fit, '-k', lw=2)
+    ax.plot(x, func(x, *popt[:3]), '--')
+    ax.plot(x, func(x, *popt[3:6]), '--')
+    ax.plot(x, func(x, *popt[6:9]), '--')
+    ax.plot(x, func(x, *popt[9:]), '--')
 
 
 def get_densities(trj: TrajectorySlice) -> None:
@@ -381,10 +447,9 @@ def calculate_density_peak_widths(grp: str, trj: TrajectorySlice) -> list[float]
         y_middle = np.mean([ycom, np.min(y[x < xcom])])
         res = x[np.isclose(np.array([y_middle for _ in y]), y, rtol=.07)]
         if len(res) >= 2:
-            return res[np.argmax(np.diff(res))+1] - res[np.argmax(np.diff(res))]
+            return res[np.argmax(np.diff(res)) + 1] - res[np.argmax(np.diff(res))]
         raise IndexError(
             f'length of array should be equal 2, got {len(res)}')
-
 
     if grp not in ['chols', 'chols_o', 'acyl_chains', 'phosphates', 'water']:
         raise ValueError(f"invalid group '{grp}',"
@@ -587,7 +652,6 @@ def integral_summary(infile: PosixPath,
 
         df_concat.to_csv(outfile)
 
-
     def calculate_relative_changes(infile: PosixPath, n_of_index_cols: int = 1) -> None:
         '''
         calculate relative changes for parameters and save them as new file in the same directory
@@ -631,6 +695,12 @@ def parse_args():
     parser.add_argument('--obtain_scd',
                         action='store_true',
                         help='obtain scd data')
+    parser.add_argument('--obtain_chl_tilt',
+                        action='store_true',
+                        help='obtain cholesterol tilt data')
+    parser.add_argument('--plot_tilts',
+                        action='store_true',
+                        help='plot cholesterol tilt data')
     parser.add_argument('--integral_summary',
                         action='store_true',
                         help='generate summary tables as well as relative value changes'
@@ -699,6 +769,12 @@ def main():
             path / 'notebooks' / 'area_per_lipid' / 'new_arperlip.csv', index=False)
         print('done.')
 
+    if args.obtain_chl_tilt:
+        print('obtaining cholesterol tilt...')
+        with ProcessPoolExecutor(max_workers=8) as executor:
+            executor.map(get_chl_tilt, trj_slices_chol)
+        print('done.')
+
     if args.obtain_scd:
         print('obtaining all scds...')
         with ProcessPoolExecutor(max_workers=8) as executor:
@@ -723,7 +799,6 @@ def main():
             path / 'notebooks' / 'chl_peak_widths' / 'chols_peak_widths.csv', index=False)
         print('done.')
 
-
     if args.integral_summary:
         print('reformatting integral parameters...')
         infiles = (path / 'notebooks' / 'thickness' / 'new_thickness.csv',
@@ -744,6 +819,18 @@ def main():
                    ['system', 'atom'], None, None, None)
         list(map(integral_summary, infiles, outfiles, indexes))
         print('done.')
+
+    if args.plot_tilts:
+        print('plotting chol tilts...')
+        for trj in trj_slices_chol:
+            fig, ax = plt.subplots(figsize=(7, 7))
+            break_tilt_into_components(ax, )
+            ax.set_xlabel('Tilt (degree)')
+            ax.set_ylabel('Density')
+            fig.patch.set_facecolor('white')
+            plt.savefig(f'{vf.path}/notebooks/chol_tilt/'
+                        f'{trj.system}_{trj.b}-{trj.e}-{trj.dt}_4_comp.png',
+                        bbox_inches='tight', facecolor=fig.get_facecolor())
 
 
 if __name__ == '__main__':
