@@ -18,7 +18,7 @@ import matplotlib.pyplot as plt
 import seaborn as sns
 from matplotlib import axes
 from scipy.interpolate import make_interp_spline
-import scipy.integrate as integrate
+from scipy import integrate
 from scipy.optimize import curve_fit
 import MDAnalysis as mda
 from MDAnalysis.selections.gromacs import SelectionWriter
@@ -127,12 +127,13 @@ def get_chl_tilt(trj: TrajectorySlice) -> None:
                      refresh_offsets=True)
     chols = u.residues[u.residues.resnames == 'CHL'].atoms
     n_chol = len(u.residues[u.residues.resnames == 'CHL'])
-    c3 = chols.select_atoms('name C3')
-    c17 = chols.select_atoms('name C17')
+    c3 = ' '.join(
+        list(map(str, chols.select_atoms('name C3').indices.tolist())))
+    c17 = ' '.join(
+        list(map(str, chols.select_atoms('name C17').indices.tolist())))
 
-    with SelectionWriter(f'{trj.system.dir}/ch3_ch17.ndx') as write_ndx:
-        write_ndx.write(c3, name='C3')
-        write_ndx.write(c17, name='C17')
+    with open(f'{trj.system.dir}/ch3_ch17.ndx', 'w') as f:
+        f.write(f'[C3]\n{c3}\n[C17]\n{c17}\n')
 
     print('calculating 👨‍💻 cholesterol 🫀 tilt 📐 ...')
 
@@ -184,32 +185,36 @@ def break_tilt_into_components(ax: axes._subplots.Axes, trj: TrajectorySlice) ->
     x, y = line.get_data()
 
     guess = [-20, 0.005, 28, -6, 0.03, 4.5, 6, 0.03, 4.5, 24, 0.005, 28]
-    popt, _ = curve_fit(func, x, y, p0=guess)
-    df = pd.DataFrame(popt.reshape(int(len(guess) / 3), 3),
-                      columns=['ctr', 'amp', 'wid'])
-    df['area'] = df.apply(lambda row: integrate.quad(func, np.min(
-        x), np.max(x), args=(row['ctr'], row['amp'], row['wid']))[0], axis=1)
-    df.to_csv(
-        f'{trj.system.path}/notebooks/chol_tilt/'
-        f'{trj.system.name}_{trj.b}-{trj.e}-{trj.dt}_4_comps.csv', index=False)
+    try:
+        popt, _ = curve_fit(func, x, y, p0=guess)
+        df = pd.DataFrame(popt.reshape(int(len(guess) / 3), 3),
+                          columns=['ctr', 'amp', 'wid'])
+        df['area'] = df.apply(lambda row: integrate.quad(func, np.min(
+            x), np.max(x), args=(row['ctr'], row['amp'], row['wid']))[0], axis=1)
+        df.to_csv(
+            f'{trj.system.path}/notebooks/chol_tilt/'
+            f'{trj.system.name}_{trj.b}-{trj.e}-{trj.dt}_4_comps.csv', index=False)
 
-    fit = func(x, *popt)
+        fit = func(x, *popt)
 
-    sns.histplot(a,
-                 # fill=False,
-                 ax=ax,
-                 lw=0,
-                 element='poly',
-                 stat='density',
-                 alpha=0.2,
-                 edgecolor='black'
-                 )
+        sns.histplot(a,
+                     # fill=False,
+                     ax=ax,
+                     lw=0,
+                     element='poly',
+                     stat='density',
+                     alpha=0.2,
+                     edgecolor='black'
+                     )
 
-    ax.plot(x, fit, '-k', lw=2)
-    ax.plot(x, func(x, *popt[:3]), '--')
-    ax.plot(x, func(x, *popt[3:6]), '--')
-    ax.plot(x, func(x, *popt[6:9]), '--')
-    ax.plot(x, func(x, *popt[9:]), '--')
+        ax.plot(x, fit, '-k', lw=2)
+        ax.plot(x, func(x, *popt[:3]), '--')
+        ax.plot(x, func(x, *popt[3:6]), '--')
+        ax.plot(x, func(x, *popt[6:9]), '--')
+        ax.plot(x, func(x, *popt[9:]), '--')
+
+    except RuntimeError as e:
+        print(f'couldn\'t curve_fit for {trj.system}: ', e)
 
 
 def get_densities(trj: TrajectorySlice) -> None:
@@ -386,9 +391,9 @@ def lists_of_values_to_df(func: Callable, trj_slices: list[TrajectorySlice]) -> 
     '''
     records = []
     for trj, i in multiproc(func, trj_slices, 8).items():
-        records.append((trj.system.name, np.mean(i), np.std(i)))
+        records.append((trj.system.name, np.mean(i), np.std(i), i))
     return pd.DataFrame.from_records(
-        records, columns=['system', 'mean', 'std'])
+        records, columns=['system', 'mean', 'std', 'data'])
 
 
 def calculate_distances_between_density_groups(
@@ -659,9 +664,9 @@ def integral_summary(infile: PosixPath,
         df = pd.read_csv(infile, index_col=list(range(n_of_index_cols)))
         df2 = pd.DataFrame(index=df.index)
         for i in [10, 30, 50]:
-            df2[f'chol{i} change (%)'] = (
+            df2[f'mean_chol{i}'] = (
                 df[f'mean_chol{i}'] - df['mean']) / df['mean'] * 100
-            df2[f'chol{i} change (%) std'] = np.sqrt(np.abs(
+            df2[f'std_chol{i}'] = np.sqrt(np.abs(
                 (df[f'std_chol{i}']**2 * df['mean']**2
                  - df['std']**2 * df[f'mean_chol{i}']**2) / df['mean']**4)) * 100
         df2.to_csv(str(infile).split('.', maxsplit=1)
@@ -673,9 +678,10 @@ def integral_summary(infile: PosixPath,
         calculate_relative_changes(outfile, len(index))
 
 # TODO: plotting: dp, scd
-# TODO: plotting: integral
 # TODO: angles, angles + densities (horizontal component percentage)
 
+
+# %%
 
 def parse_args():
     '''
@@ -686,6 +692,9 @@ def parse_args():
     parser.add_argument('--obtain_densities',
                         action='store_true',
                         help='obtain density data')
+    parser.add_argument('--plot_dps',
+                        action='store_true',
+                        help='plot density profiles')
     parser.add_argument('--obtain_thickness',
                         action='store_true',
                         help='obtain thickness data')
@@ -701,10 +710,6 @@ def parse_args():
     parser.add_argument('--plot_tilts',
                         action='store_true',
                         help='plot cholesterol tilt data')
-    parser.add_argument('--integral_summary',
-                        action='store_true',
-                        help='generate summary tables as well as relative value changes'
-                        'for integral parameters')
     parser.add_argument('--chl_p_distances',
                         action='store_true',
                         help='calculate distances between chols COMs and phosphates'
@@ -713,6 +718,10 @@ def parse_args():
                         action='store_true',
                         help='calculate peak width of chols densities'
                         'and between chl_o and phosphates')
+    parser.add_argument('--integral_summary',
+                        action='store_true',
+                        help='generate summary tables as well as relative value changes'
+                        'for integral parameters')
     parser.add_argument('--dt', type=int, default=1000,
                         help='dt in ps')
     parser.add_argument('--b', type=int, default=150,
@@ -820,17 +829,68 @@ def main():
         list(map(integral_summary, infiles, outfiles, indexes))
         print('done.')
 
+        def integral_plot(csv: PosixPath) -> None:
+            '''
+            save integral tables as plots
+            '''
+            df = pd.read_csv(csv)
+            # df.fillna(0, inplace=True)
+            df.columns = ['systems'] + list(df.columns[1:])
+            sns.set_palette('mako')
+            if not 'relative' in str(csv):
+                plt.errorbar(df.systems + [' ' for _ in range(len(df))] + df.iloc[:, 1] if 'chain' in str(csv) else df.systems,
+                             df['mean'], yerr=df['std'], capsize=5, fmt='s', ms=15,
+                             label='0 %')
+            for i in [10, 30, 50]:
+                plt.errorbar(df.systems + [' ' for _ in range(len(df))] + df.iloc[:, 1]
+                             if 'chain' in str(csv) else df.systems,
+                             df[f'mean_chol{i}'],
+                             yerr=df[f'std_chol{i}'],
+                             label=f'{i} %',
+                             capsize=5, fmt='s', ms=15)
+            plt.ylabel(str(csv).rsplit('/', maxsplit=1)
+                       [-1].split('.', maxsplit=1)[0])
+            if 'chain' in str(csv):
+                plt.xticks(rotation=45, ha='right', rotation_mode='anchor')
+            plt.legend(title='cholesterol content')
+            plt.savefig(str(csv).split('.', 1)[0] + '.png',
+                        bbox_inches='tight')
+            plt.close()
+
+        print('plotting...')
+        indexes = [0, 1, 2, 4, 5, 6]
+        for i in [outfiles[x] for x in indexes]:
+            integral_plot(i)
+        integral_plot(path / 'notebooks' / 'integral_parameters' /
+                      'thickness_relative_changes.csv')
+        integral_plot(path / 'notebooks' / 'integral_parameters' /
+                      'arperlip_relative_changes.csv')
+        print('done')
+
     if args.plot_tilts:
         print('plotting chol tilts...')
         for trj in trj_slices_chol:
             fig, ax = plt.subplots(figsize=(7, 7))
-            break_tilt_into_components(ax, )
+            break_tilt_into_components(ax, trj)
             ax.set_xlabel('Tilt (degree)')
             ax.set_ylabel('Density')
             fig.patch.set_facecolor('white')
-            plt.savefig(f'{vf.path}/notebooks/chol_tilt/'
-                        f'{trj.system}_{trj.b}-{trj.e}-{trj.dt}_4_comp.png',
+            plt.savefig(f'{path}/notebooks/chol_tilt/'
+                        f'{trj.system}_{trj.b}-{trj.e}-{trj.dt}_4_comps.png',
                         bbox_inches='tight', facecolor=fig.get_facecolor())
+            plt.close()
+
+    if args.plot_dps:
+        print('plotting density profiles...')
+        sns.set_palette('bright')
+        for trj in trj_slices:
+            fig, ax = plt.subplots(figsize=(7, 7))
+            plot_density_profile(ax, trj)
+            fig.patch.set_facecolor('white')
+            plt.savefig(f'{path}/notebooks/dp/'
+                        f'{trj.system}_{trj.b}-{trj.e}-{trj.dt}_dp.png',
+                        bbox_inches='tight', facecolor=fig.get_facecolor())
+            plt.close()
 
 
 if __name__ == '__main__':
