@@ -123,7 +123,7 @@ def get_chl_tilt(trj: TrajectorySlice) -> None:
         f'🗄️ system:\t{trj.system}\n⌚️ time:\t{trj.b}-{trj.e} ns, dt={trj.dt} ps')
     print('obtaining 💁 system 🏙️ information...')
     u = mda.Universe(f'{trj.system.dir}/md/md.tpr',
-                     f'{trj.system.dir}/md/pbcmol.xtc',
+                     f'{trj.system.dir}/md/md.gro',
                      refresh_offsets=True)
     chols = u.residues[u.residues.resnames == 'CHL'].atoms
     n_chol = len(u.residues[u.residues.resnames == 'CHL'])
@@ -242,7 +242,7 @@ def get_densities(trj: TrajectorySlice) -> None:
                     write_ndx.write(group, name=ind)
 
         u = mda.Universe(f'{system.dir}/md/md.tpr',
-                         f'{system.dir}/md/pbcmol.xtc', refresh_offsets=True)
+                         f'{system.dir}/md/md.gro', refresh_offsets=True)
 
         mask = np.logical_or.reduce(
             ([u.residues.resnames == res for res in trj.system.resnames_from_systname()]))
@@ -677,11 +677,17 @@ def integral_summary(infile: PosixPath,
     else:
         calculate_relative_changes(outfile, len(index))
 
-# TODO: plotting: dp, scd
-# TODO: angles, angles + densities (horizontal component percentage)
+# TODO: plotting: scd
+# angles, angles + densities (horizontal component percentage)
 
 
 # %%
+
+# TODO: reformat parse args and main:
+# parse args to one list
+# in help list of available values
+# in main make dict = {key_from_list: function}
+# then use dict.get()
 
 def parse_args():
     '''
@@ -722,12 +728,12 @@ def parse_args():
                         action='store_true',
                         help='generate summary tables as well as relative value changes'
                         'for integral parameters')
-    parser.add_argument('--dt', type=int, default=1000,
-                        help='dt in ps')
     parser.add_argument('--b', type=int, default=150,
                         help='beginning time in ns')
     parser.add_argument('--e', type=int, default=200,
                         help='ending time in ns')
+    parser.add_argument('--dt', type=int, default=1000,
+                        help='dt in ps')
 
     if len(sys.argv) < 2:
         parser.print_usage()
@@ -758,6 +764,10 @@ def main():
 
     trj_slices = [TrajectorySlice(
         System(path, s), args.b, args.e, args.dt) for s in systems]
+    # FIXME: delete after dopc_dops50 will be calculated
+    trj_slices.append(TrajectorySlice(System(path, 'dopc_dops50'), 4, 54, 1000))
+
+
     trj_slices_chol = [TrajectorySlice(
         System(path, s), args.b, args.e, args.dt) for s in systems if 'chol' in s]
 
@@ -817,16 +827,24 @@ def main():
                    path / 'notebooks' / 'chl_p_distances' / 'chols_phosphates_distances.csv',
                    path / 'notebooks' / 'chl_p_distances' / 'chols_o_phosphates_distances.csv',
                    path / 'notebooks' / 'chl_peak_widths' / 'chols_peak_widths.csv')
-        outfiles = (path / 'notebooks' / 'integral_parameters' / 'thickness.csv',
-                    path / 'notebooks' / 'integral_parameters' / 'arperlip.csv',
-                    path / 'notebooks' / 'integral_parameters' / 'scd_chains.csv',
-                    path / 'notebooks' / 'integral_parameters' / 'scd_atoms.csv',
-                    path / 'notebooks' / 'integral_parameters' / 'chols_phosphates_distances.csv',
-                    path / 'notebooks' / 'integral_parameters' / 'chols_o_phosphates_distances.csv',
-                    path / 'notebooks' / 'integral_parameters' / 'chols_peak_widths.csv')
+        outfiles = (path / 'notebooks' / 'integral_parameters' /
+                    f'thickness-{args.b}-{args.e}-{args.dt}.csv',
+                    path / 'notebooks' / 'integral_parameters' /
+                    f'arperlip-{args.b}-{args.e}-{args.dt}.csv',
+                    path / 'notebooks' / 'integral_parameters' /
+                    f'scd_chains-{args.b}-{args.e}-{args.dt}.csv',
+                    path / 'notebooks' / 'integral_parameters' /
+                    f'scd_atoms-{args.b}-{args.e}-{args.dt}.csv',
+                    path / 'notebooks' / 'integral_parameters' /
+                    f'chols_phosphates_distances-{args.b}-{args.e}-{args.dt}.csv',
+                    path / 'notebooks' / 'integral_parameters' /
+                    f'chols_o_phosphates_distances-{args.b}-{args.e}-{args.dt}.csv',
+                    path / 'notebooks' / 'integral_parameters' /
+                    f'chols_peak_widths-{args.b}-{args.e}-{args.dt}.csv')
         indexes = (None, None, ['system', 'chain'],
                    ['system', 'atom'], None, None, None)
         list(map(integral_summary, infiles, outfiles, indexes))
+        # create integral_all.csv + scd_all with atoms and chains 
         print('done.')
 
         def integral_plot(csv: PosixPath) -> None:
@@ -837,7 +855,7 @@ def main():
             # df.fillna(0, inplace=True)
             df.columns = ['systems'] + list(df.columns[1:])
             sns.set_palette('mako')
-            if not 'relative' in str(csv):
+            if 'relative' not in str(csv):
                 plt.errorbar(df.systems + [' ' for _ in range(len(df))] + df.iloc[:, 1] if 'chain' in str(csv) else df.systems,
                              df['mean'], yerr=df['std'], capsize=5, fmt='s', ms=15,
                              label='0 %')
@@ -862,13 +880,14 @@ def main():
         for i in [outfiles[x] for x in indexes]:
             integral_plot(i)
         integral_plot(path / 'notebooks' / 'integral_parameters' /
-                      'thickness_relative_changes.csv')
+                      f'thickness-{args.b}-{args.e}-{args.dt}_relative_changes.csv')
         integral_plot(path / 'notebooks' / 'integral_parameters' /
-                      'arperlip_relative_changes.csv')
+                      f'arperlip-{args.b}-{args.e}-{args.dt}_relative_changes.csv')
         print('done')
 
     if args.plot_tilts:
         print('plotting chol tilts...')
+        sns.set_palette('bright')
         for trj in trj_slices_chol:
             fig, ax = plt.subplots(figsize=(7, 7))
             break_tilt_into_components(ax, trj)
