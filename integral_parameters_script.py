@@ -380,16 +380,21 @@ def chl_tilt_summary(trj_slices: list[TrajectorySlice]) -> None:
     for trj in trj_slices:
         lines = opener(trj_slices[0].system.path / 'notebooks' / 'chol_tilt' /
                        f'{trj.system.name}_{trj.b}-{trj.e}-{trj.dt}_tilt.xvg')
+        timepoint = np.array(
+            list(map(int, [i.split()[0] for i in lines])))
         a = np.array(
             list(map(float, flatten([i.split()[1:] for i in lines])))) - 90
-        records.append((trj.system.name, a))
+        n_chols = int(a.shape[0] / timepoint.shape[0])
+        timepoints = [i for i in timepoint for _ in range(n_chols)]
+        chl_indices = flatten([[i for i in range(n_chols)] for _ in timepoint])
+        records.append((trj.system.name, timepoints, chl_indices, a))
     df = pd.DataFrame.from_records(
-        records, columns=['system', 'α, °'])
+        records, columns=['system', 'timepoint', 'chl_index', 'α, °'])
     df.sort_values('system', inplace=True, ignore_index=True)
     df['CHL amount, %'] = df['system'].str.split('_chol', n=1, expand=True)[1]
     df['system'] = df['system'].str.split('_chol', n=1, expand=True)[0]
     df.replace(to_replace=[None], value=0, inplace=True)
-    return df.explode('α, °')
+    return df.explode(['timepoint', 'chl_index', 'α, °'])
 
 
 def chl_tilt_angle(trj_slices: list[TrajectorySlice]) -> None:
@@ -526,22 +531,168 @@ def density_profiles(experiments: dict, trj_slices: list[TrajectorySlice]) -> No
     print('done.')
 
 
-def scd_atoms():
-    pass
+def plot_scd_atoms(experiments: dict, trj_slices: list[TrajectorySlice]) -> None:
+    '''
+    plot per atom scd data for each system (different amount of CHL),
+    one file per experiment.
+    '''
+    def dfol(df: pd.DataFrame, system: str, chain: str, chl_amount: int) -> pd.DataFrame:
+        '''
+        extract data for one line in plot from df
+        '''
+        return df[(df['system'] == system)
+                  & (df['chain'] == chain)
+                  & (df['CHL amount, %'] == chl_amount)]
+
+    def scd_plot(scd_ms: pd.DataFrame, exp: str, systs: tuple) -> None:
+        '''
+        plot scd data of one experiment
+        '''
+        scd_ms_part = scd_ms[scd_ms['system'].str.fullmatch('|'.join(systs))]
+        fig, axs = plt.subplots(1, 3, figsize=(
+            21, 7), sharex=True, sharey=True)
+        for s,  ax in zip(systs, axs):
+            ax.set_title(s)
+            ax.set_xlabel('C atom number')
+            for c, chl in enumerate((0, 10, 30, 50)):
+                for sn, ls in zip(('sn-1', 'sn-2'),
+                                  ('-', '--')):
+                    ax.errorbar(x=dfol(scd_ms_part, s, sn, chl)['atom_n'],
+                                y=dfol(scd_ms_part, s, sn, chl)['scd']['mean'],
+                                yerr=dfol(scd_ms_part, s, sn, chl)[
+                        'scd']['std'],
+                        ls=ls, color=sns.color_palette('cubehelix')[c],
+                        elinewidth=1, label=f'{chl} % CHL, {sn}'
+                    )
+        axs[0].set_ylabel('Scd')
+        handles, labels = axs[0].get_legend_handles_labels()
+        fig.legend(handles, labels)
+        fig.suptitle(exp, fontsize=16)
+        plt.savefig(trj_slices[0].system.path / 'notebooks' / 'integral_parameters' /
+                    f'{"_".join(exp.split())}_'
+                    f'scd_{trj_slices[0].b}_{trj_slices[0].e}_{trj_slices[0].dt}.png',
+                    bbox_inches='tight')
+        plt.close()
+
+    path, b, e, dt = trj_slices[0].system.path, trj_slices[0].b, trj_slices[0].e, trj_slices[0].dt
+    df = pd.read_csv(path / 'notebooks' /
+                     'integral_parameters' / f'scd_{b}-{e}-{dt}.csv')
+    df['atom_n'] = df['atom'].apply(lambda x: int(x[2:]))
+    # df.sort_values(['system', 'CHL amount, %', 'chain', 'atom_n'], inplace=True)
+    scd_ms = df.drop(columns=['timepoint', 'atom']).groupby(
+        ['system', 'CHL amount, %', 'chain', 'atom_n'],
+        as_index=False).agg(['mean', 'std'])
+    scd_ms = scd_ms.reset_index(level=1).reset_index(
+        level=1).reset_index(level=1).reset_index()
+
+    print('plotting dp by experiment...')
+
+    for exp, systs in experiments.items():
+        scd_plot(scd_ms, exp, systs)
+    print('done.')
 
 
-def angles_density():
-    pass
+def plot_angles_density(experiments: dict, trj_slices: list[TrajectorySlice]) -> None:
+    '''
+    calculate percentage of chl tilt horizontal component in systems
+    and plot it together with density plots;
+    9 plots per experiment
+    '''
+    def obtain_df_of_density(trj_slices: list[TrajectorySlice]) -> pd.DataFrame:
+        '''
+        summarize data from different files of density to one df
+        '''
+        records = []
+        for trj in trj_slices:
+            for fr in range(trj_slices[0].b, trj_slices[0].e, int(trj_slices[0].dt / 1000)):
+                lines = opener(Path(trj.system.dir) / 'density_profiles' /
+                               f'chols_{fr}-{fr}-0_dp.xvg')
+                z = np.array(
+                    list(map(float, [i.split()[0] for i in lines])))
+                a = np.array(
+                    list(map(float, flatten([i.split()[1:] for i in lines]))))
+                n_chols = int(a.shape[0] / z.shape[0])
+                z_col = [i for i in z for _ in range(n_chols)]
+                chl_indices = flatten([[i for i in range(n_chols)] for _ in z])
+                records.append(
+                    (trj.system.name, fr * 1000, chl_indices, z_col, a))
+        df = pd.DataFrame.from_records(
+            records, columns=['system', 'timepoint', 'chl_index', 'z', 'density'])
+        df.sort_values('system', inplace=True, ignore_index=True)
+        df['CHL amount, %'] = df['system'].str.split(
+            '_chol', n=1, expand=True)[1]
+        df['system'] = df['system'].str.split('_chol', n=1, expand=True)[0]
+        df.replace(to_replace=[None], value=0, inplace=True)
+        return df.explode(['chl_index', 'z', 'density'])
+
+    def angle_refers_to_component(syst, angle, chl) -> tuple:
+        '''
+        depending on system and chl amount determine component:
+        1 vertical, 2 horizontal
+        returns tuple (1,), (2,) or (1,2)
+
+        ctr +- 1/2 wid => angle in component
+        components are located in notebooks/chol_tilt/{syst}_100-200-100_4_comps.csv
+        '''
+        comps = pd.read_csv('/home/klim/Documents/chol_impact/'
+                            f'notebooks/chol_tilt/{syst}_chol{chl}_100-200-100_4_comps.csv')
+        res = []
+        angle = -9
+        if (angle >= comps.loc[0, 'ctr'] - comps.loc[0, 'wid'] / 2
+            and angle <= comps.loc[0, 'ctr'] + comps.loc[0, 'wid'] / 2
+            or angle >= comps.loc[3, 'ctr'] - comps.loc[3, 'wid'] / 2
+                and angle <= comps.loc[3, 'ctr'] + comps.loc[3, 'wid'] / 2):
+            res.append(2)
+        if (angle >= comps.loc[1, 'ctr'] - comps.loc[1, 'wid'] / 2
+            and angle <= comps.loc[1, 'ctr'] + comps.loc[1, 'wid'] / 2
+            or angle >= comps.loc[2, 'ctr'] - comps.loc[2, 'wid'] / 2
+                and angle <= comps.loc[2, 'ctr'] + comps.loc[2, 'wid'] / 2):
+            res.append(1)
+        return tuple(res)
+
+    trj_slices = [s for s in trj_slices if 'chol' in s.system.name]
+    df = pd.read_csv(trj_slices[0].system.path / 'notebooks' /
+                     'integral_parameters' / f'chl_tilt_100-200-100.csv')
+    df = df[df['timepoint'].astype(str).str.fullmatch('|'.join(
+        [str(i) for i in range(trj_slices[0].b * 1000,
+                               trj_slices[0].e * 1000, trj_slices[0].dt)]))].copy()
+    df = df.reset_index().drop(columns=['index'])
+
+    print('determining angle components...')
+    df['comp'] = df.apply(
+        lambda row: angle_refers_to_component(
+            row['system'], row['α, °'], row['CHL amount, %']), axis=1)
+
+    print('reformatting density data...')
+    dens = obtain_df_of_density(trj_slices).sort_values(
+        ['system', 'CHL amount, %', 'timepoint',
+         'chl_index', 'z'], ignore_index=True).drop_duplicates(ignore_index=True)
+    dens['chl_index'] = dens['chl_index'].astype(int)
+    dens['CHL amount, %'] = dens['CHL amount, %'].astype(int)
+    common_ndx = ['system', 'CHL amount, %', 'timepoint', 'chl_index']
+
+    print('analyzing components and densities...')
+    merged = dens.merge(df, on=common_ndx, how='left').drop_duplicates(
+        ignore_index=True).sort_values(
+        ['system', 'CHL amount, %', 'timepoint', 'z'], ignore_index=True)
+    merged['density'] = merged.density.astype(float)
+    merged = merged.join(merged.groupby(
+        ['system', 'CHL amount, %', 'timepoint', 'z'])['density'].sum(),
+        on=['system', 'CHL amount, %', 'timepoint', 'z'], rsuffix='_sum')
+    merged['density_fraction'] = merged['density'] / merged['density_sum']
+    merged = merged.explode(['comp'])
+    merged['comp'] = merged.comp.astype(str)
+    merged = merged.join(pd.get_dummies(merged['comp']))
+    merged['comp_2_fr'] = merged['density_fraction'] * merged['2']
+    merged['comp_1_fr'] = merged['density_fraction'] * merged['1']
+    merged['comp_fr_sum'] = merged['comp_2_fr'] + merged['comp_1_fr']
+    merged['% of horizontal component'] = merged['comp_2_fr'] / \
+        merged['comp_fr_sum'] * 100
+    merged.to_csv(trj_slices[0].system.path / 'notebooks' /
+                  'integral_parameters' / 'tilt_density.csv')
+
 
 # %%
-
-# TODO: plotting: scd
-# angles, angles + densities (horizontal component percentage)
-# reformat parse args and main:
-# parse args to one list
-# in help list of available values
-# in main make dict = {key_from_list: function}
-# then use dict.get()
 
 
 def parse_args():
@@ -587,9 +738,8 @@ def main():
     parse arguments and obtain and plot system parameters such as
     density profiles, area per lipid,thickness, Scd and cholesterol tilt angle
     '''
-    plt.style.use('seaborn-talk')
+    sns.set(style='ticks', context='talk', palette='bright')
     args = parse_args()
-    path = Path('/home/klim/Documents/chol_impact/')
     experiments = {
         'chain length': ('dmpc', 'dppc_325', 'dspc'),
         'chain saturation': ('dppc_325', 'popc', 'dopc'),
@@ -614,8 +764,8 @@ def main():
                'chl_p_distance': chl_p_distance}
 
     to_plot = {'dp': density_profiles,
-               'scd_atoms': scd_atoms,
-               'angles_density': angles_density}
+               'scd_atoms': plot_scd_atoms,
+               'angles_density': plot_angles_density}
 
     if args.calculate is not None:
         for arg in args.calculate:
