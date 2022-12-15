@@ -6,12 +6,11 @@ thickness, Scd and cholesterol tilt angle
 '''
 
 from pathlib import Path, PosixPath
-from concurrent.futures import ProcessPoolExecutor, ThreadPoolExecutor, as_completed
 from typing import Callable
+from concurrent.futures import ProcessPoolExecutor, ThreadPoolExecutor
 import argparse
 import os
 import sys
-from dataclasses import dataclass, field
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
@@ -21,97 +20,12 @@ from scipy.interpolate import make_interp_spline
 from scipy import integrate
 from scipy.optimize import curve_fit
 import MDAnalysis as mda
-from MDAnalysis.selections.gromacs import SelectionWriter
 
-from mhp_stats_script import flatten, sparkles, duration
-
-
-def opener(inp: PosixPath) -> list[str]:
-    '''
-    open text file as list of lines
-    '''
-    with open(inp, 'r', encoding='utf-8') as f:
-        lines = [i.strip() for i in f.read().strip().split('\n')]
-    return lines
-
-
-def multiproc(func: Callable, data: list, n_workers: int = 8) -> dict:
-    '''
-    wrapper for ProcessPoolExecutor,
-    gets function, list of arguments (single argument) and max n of workers,
-    gives dictionary {arguments: results}
-    '''
-    result = {}
-
-    with ProcessPoolExecutor(max_workers=n_workers) as executor:
-        futures = {executor.submit(func, i): i for i in data}
-        for f in as_completed(futures.keys()):
-            result[futures[f]] = f.result()
-
-    return result
-
-
-@dataclass(frozen=True, unsafe_hash=True)
-class System:
-    '''
-    stores system name and path
-    '''
-    path: PosixPath  # directory containing system directory
-    name: str
-    dir: str = field(init=False)
-
-    def __post_init__(self):
-        object.__setattr__(self, 'dir', str(self.path / self.name))
-
-    def __repr__(self):
-        return f'System({self.name})'
-
-    def __str__(self):
-        return self.name
-
-    def get_tpr_props(self) -> str:
-        '''
-        obtain properties of tpr of the system
-        '''
-        gmxutils = '/nfs/belka2/soft/impulse/dev/inst/gmx_utils.py'
-        return os.popen(f'{gmxutils} {self.dir}/md/md.tpr').read()
-
-    def get_n_chols(self) -> str:
-        '''
-        obtain number of cholesterol molecules
-        '''
-        return [i.strip() for i in
-                [i for i in self.get_tpr_props().split('\n')
-                 if i.startswith('CHOL')][0].split('|')][1]
-
-    def resnames_from_systname(self) -> list[str]:
-        '''
-        obtain residue names of system (MDAnalysis format)
-        '''
-        no_numbers = ''.join([i for i in self.name if not i.isdigit()])
-        return [i.upper() if not i == 'chol' else 'CHL' for i in no_numbers.split('_')]
-
-    def pl_selector(self, n=0) -> str:
-        '''
-        obtain selector string of main phospholipid (impulse format)
-        '''
-        return f"'{self.name.split('_')[n].upper()}///'"
-
-
-@dataclass(frozen=True, unsafe_hash=True)
-class TrajectorySlice:
-    '''
-    stores beginnig (b), ending (e) timepoints (in ns)
-    with dt (in ps) between them of system trajectory
-    '''
-    system: System
-    b: int
-    e: int
-    dt: int
-
-    def __repr__(self):
-        return f'TrajectorySlice({self.system.name}, ' \
-            f'b={self.b}, e={self.e}, dt={self.dt})'
+from modules.general import opener, multiproc, flatten, sparkles, duration, calc_1d_com
+from modules.traj import System, TrajectorySlice
+from modules.density import get_densities, plot_density_profile
+from modules.density import calculate_distances_between_density_groups
+from modules.density import calculate_density_peak_widths
 
 
 def get_chl_tilt(trj: TrajectorySlice) -> None:
@@ -222,153 +136,6 @@ def break_tilt_into_components(ax: axes._subplots.Axes, trj: TrajectorySlice) ->
         print(f'couldn\'t curve_fit for {trj.system}: ', e)
 
 
-def get_densities(trj: TrajectorySlice) -> None:
-    '''
-    obtain densities of groups
-    '''
-    def create_index_files(system: System) -> None:
-        '''
-        create index files for groups
-        '''
-        def write_index_file(system: System,
-                             ind: str,
-                             group: mda.core.groups.AtomGroup,
-                             lipids: mda.core.groups.AtomGroup) -> None:
-            '''
-            write index fie for current group
-            '''
-            with SelectionWriter(f'{system.dir}/density_profiles/{ind}.ndx') \
-                    as write_ndx:
-                write_ndx.write(lipids, name='LIPIDS')
-                if ind == 'chols':
-                    for i in group:
-                        write_ndx.write(i)
-                else:
-                    write_ndx.write(group, name=ind)
-
-        u = mda.Universe(f'{system.dir}/md/md.tpr',
-                         f'{system.dir}/md/md.gro', refresh_offsets=True)
-
-        mask = np.logical_or.reduce(
-            ([u.residues.resnames == res for res in trj.system.resnames_from_systname()]))
-        lipids = u.residues[mask].atoms
-
-        chols = u.residues[u.residues.resnames == 'CHL']
-
-        acyl_chains = sum((lip.atoms.select_atoms(
-            'smarts [C;$(CCCCC)] or smarts C=C',
-            rdkit_kwargs={'max_iter': 1000}).atoms
-            for lip in (lipids - chols.atoms).residues))
-
-        water = u.residues[u.residues.resnames == 'SOL'].atoms
-        phosphates = (lipids - chols.atoms).select_atoms('smarts OP(O)(=O)O',
-                                                         rdkit_kwargs={'max_iter': 1000}).atoms
-        cholesterol_o = chols.atoms.select_atoms('element O').atoms
-        individual_chols = [i.atoms for i in chols]
-
-        if 'chol' in trj.system.name:
-            write_index_file(system, 'chols', individual_chols, lipids)
-            write_index_file(system, 'chols_o', cholesterol_o, lipids)
-        write_index_file(system, 'acyl_chains', acyl_chains, lipids)
-        write_index_file(system, 'phosphates', phosphates, lipids)
-        write_index_file(system, 'water', water, lipids)
-
-    def obt_dens(trj: TrajectorySlice, ind: str) -> None:
-        '''
-        obtain density for current group
-        '''
-        if (Path(trj.system.dir) / 'density_profiles' /
-                f'{ind}_{trj.b}-{trj.e}-{trj.dt}_dp.xvg').is_file():
-            print(f'{ind}_{trj.b}-{trj.e}-{trj.dt}_dp.xvg exists, skipping...')
-        else:
-            print(f'obtaining density of {ind}...')
-            if 'chol' in trj.system.name:
-                n_chol = trj.system.get_n_chols()
-            cmd = ['source `ls -t /usr/local/gromacs*/bin/GMXRC | head -n 1 ` &&',
-                   f'gmx density -s {trj.system.dir}/md/md.tpr',
-                   f'-f {trj.system.dir}/md/pbcmol.xtc',
-                   f'-n {trj.system.dir}/density_profiles/{ind}.ndx',
-                   f'-b {trj.b*1000} -e {trj.e*1000} -dt {trj.dt} -sl 100',
-                   f'-o {trj.system.dir}/density_profiles/{ind}_{trj.b}-{trj.e}-{trj.dt}_dp.xvg',
-                   '-xvg none -center -symm']
-            if ind == 'chols':
-                numbers = ' '.join([str(i) for i in range(int(n_chol) + 1)])
-                cmd.insert(1, f'echo {numbers} |')
-                cmd.append(f'-ng {n_chol}')
-            else:
-                cmd.insert(1, 'echo 0 1 |')
-            os.popen(' '.join(cmd)).read()
-
-    groups = ['chols', 'chols_o', 'acyl_chains', 'phosphates', 'water']
-    print(
-        f'🗄️ system:\t{trj.system.name}\n⌚️ time:\t{trj.b}-{trj.e} ns, dt={trj.dt} ps')
-    (Path(trj.system.dir) / 'density_profiles').mkdir(exist_ok=True)
-    print('obtaining 💁 system 🏙️ information...')
-
-    if not 'chol' in trj.system.name:
-        for i in ('chols', 'chols_o'):
-            if i in groups:
-                groups.remove(i)
-
-    if not np.all(
-            [Path(f'{trj.system.dir}/density_profiles/{gr}.ndx').is_file()
-             for gr in groups]):
-        print('creating index files...')
-        create_index_files(trj.system)
-
-    else:
-        print('skipping index files creation...')
-
-    for gr in groups:
-        obt_dens(trj, gr)
-
-    print('done ✅\n')
-
-
-def plot_density_profile(ax: axes._subplots.Axes,
-                         trj: TrajectorySlice,
-                         groups: list = None,
-                         color: str = None,
-                         label: str = None) -> None:
-    '''
-    plot density profile of system on single axes
-    '''
-
-    print('plotting dp for \n'
-          f'🗄️ system:\t{trj.system}\n⌚️ time:\t{trj.b}-{trj.e} ns, dt={trj.dt} ps')
-    if groups is None:
-        groups = ['chols', 'chols_o', 'acyl_chains', 'phosphates', 'water'] \
-            if 'chol' in trj.system.name else ['acyl_chains', 'phosphates', 'water']
-
-    dfs = {gr: pd.read_csv(
-        f'{trj.system.dir}/density_profiles/{gr}_{trj.b}-{trj.e}-{trj.dt}_dp.xvg',
-        header=None, delim_whitespace=True) for gr in groups}
-
-    # sum cholesterol profiles
-    if 'chols' in groups:
-        dfs['chols'][1] = dfs['chols'].iloc[:, 1:].sum(axis=1)
-        dfs['chols'] = dfs['chols'].iloc[:, :2]
-
-    for gr in groups[::-1]:
-        x, y = dfs[gr][0], dfs[gr][1]
-        x_y_spline = make_interp_spline(x, y)
-        x_ = np.linspace(x.min(), x.max(), 500)
-        y_ = x_y_spline(x_)
-        if label is None:
-            ax.plot(x_, y_, label=gr, color=color)
-        else:
-            ax.plot(x_, y_, label=f'{gr}, {label}', color=color)
-        ax.set_xlabel('Z, nm')
-        ax.set_ylabel('Density, kg/m³')
-
-
-def calc_1d_com(x, m):
-    '''
-    calculate center of mass of 1D array
-    '''
-    return np.sum(x * m) / np.sum(m)
-
-
 def calculate_thickness(trj: TrajectorySlice) -> list[float]:
     '''
     calculates thickness in each step of trajectory part using phosphates densities
@@ -390,92 +157,6 @@ def calculate_thickness(trj: TrajectorySlice) -> list[float]:
             calc_1d_com(x_[x_ > 0], x_y_spline(x_[x_ > 0]))
             - calc_1d_com(x_[x_ < 0], x_y_spline(x_[x_ < 0])))
     return thickness_list
-
-
-def calculate_distances_between_density_groups(
-        grp1: str, grp2: str, trj: TrajectorySlice) -> list[float]:
-    '''
-    calculates distances between density groups in each step of trajectory part
-    using densities of corresponding groups
-    '''
-    groups = ['chols', 'chols_o', 'acyl_chains', 'phosphates', 'water']
-    if grp1 not in groups or grp2 not in groups:
-        raise ValueError(f"invalid groups: '{grp1}' '{grp2}',"
-                         " only 'chols', 'chols_o', 'acyl_chains', 'phosphates', 'water' "
-                         'groups are supported')
-    distances = []
-    for fr in range(trj.b, trj.e, int(trj.dt / 1000)):
-        df1 = pd.read_csv(f'{trj.system.dir}/density_profiles/{grp1}_{fr}-{fr}-0_dp.xvg',
-                          header=None, delim_whitespace=True)
-        df2 = pd.read_csv(f'{trj.system.dir}/density_profiles/{grp2}_{fr}-{fr}-0_dp.xvg',
-                          header=None, delim_whitespace=True)
-        x, y1, y2 = df1[0], df1[1], df2[1]
-        x_y_spline1, x_y_spline2 = make_interp_spline(
-            x, y1),  make_interp_spline(x, y2)
-        x_ = np.linspace(x.min(), x.max(), 500)
-
-        grps = dict(
-            grp1_com_pos=calc_1d_com(x_[x_ > 0], x_y_spline1(x_[x_ > 0])),
-            grp2_com_pos=calc_1d_com(x_[x_ > 0], x_y_spline2(x_[x_ > 0])),
-            grp1_com_neg=calc_1d_com(x_[x_ < 0], x_y_spline1(x_[x_ < 0])),
-            grp2_com_neg=calc_1d_com(x_[x_ < 0], x_y_spline2(x_[x_ < 0])))
-
-        distances.append(grps['grp2_com_pos'] - grps['grp1_com_pos'])
-        distances.append(grps['grp1_com_neg'] - grps['grp2_com_neg'])
-    return distances
-
-
-def calculate_density_peak_widths(grp: str, trj: TrajectorySlice) -> list[float]:
-    '''
-    peak width of density is calculated by
-    obtaining x value of yCOM
-    after that, minimum value ymin between x=0 and that x is found
-    then we are finding y value in the center ymin and yCOM
-    and finding peak width aka difference between x values where
-    density profile is intersecting this y
-    '''
-    def calc_single_peak_width(x: np.ndarray, spline: Callable) -> float:
-        '''
-        calculate single peak width
-        '''
-        y = spline(x)
-        xcom = calc_1d_com(x, y)
-        ycom = spline(xcom)
-        x, y = np.abs(x), np.abs(y)
-        for i in (x, y, np.array(xcom), np.array(ycom)):
-            np.abs(i, out=i)
-
-        y_middle = np.mean([ycom, np.min(y[x < xcom])])
-        res = x[np.isclose(np.array([y_middle for _ in y]), y, rtol=.07)]
-        if len(res) >= 2:
-            return res[np.argmax(np.diff(res)) + 1] - res[np.argmax(np.diff(res))]
-        raise IndexError(
-            f'length of array should be equal 2, got {len(res)}')
-
-    if grp not in ['chols', 'chols_o', 'acyl_chains', 'phosphates', 'water']:
-        raise ValueError(f"invalid group '{grp}',"
-                         " only 'chols', 'chols_o', 'acyl_chains', 'phosphates', 'water' "
-                         'groups are supported')
-
-    peak_widths = []
-    for fr in range(trj.b, trj.e, int(trj.dt / 1000)):
-        df = pd.read_csv(f'{trj.system.dir}/density_profiles/{grp}_{fr}-{fr}-0_dp.xvg',
-                         header=None, delim_whitespace=True)
-        if grp == 'chols':
-            df[1] = df.iloc[:, 1:].sum(axis=1)
-            df = df.iloc[:, :2]
-        x, y = df[0], df[1]
-        x_y_spline = make_interp_spline(x, y)
-        x_ = np.linspace(x.min(), x.max(), 500)
-        try:
-            peak_widths.append(calc_single_peak_width(x_[x_ > 0], x_y_spline))
-            peak_widths.append(calc_single_peak_width(x_[x_ < 0], x_y_spline))
-
-        # FIXME: errors are occuring :c
-        except ValueError as e:
-            print(trj.system.name, fr)
-            print(e)
-    return peak_widths
 
 
 def density_peak_widths_chols(trj: TrajectorySlice) -> list[float]:
@@ -595,88 +276,6 @@ def scd_summary(trj_slices: list[TrajectorySlice]) -> None:
     df['system'] = df['system'].str.split('_chol', n=1, expand=True)[0]
     df.replace(to_replace=[None], value=0, inplace=True)
     return df
-    # df.to_csv(scd_folder / 'scd_all_new.csv', index=False)
-    #
-    # print('summary table for atoms...')
-    # df = pd.read_csv(scd_folder / 'scd_all_new.csv')
-    # atom_summary = df.groupby(['system', 'atom'], as_index=False).agg(
-    #     'mean').rename({'scd': 'mean'}, axis=1)
-    # atom_summary = atom_summary.assign(std=df.groupby(
-    #     ['system', 'atom']).agg(np.std)['scd'].values)
-    # atom_summary.to_csv(scd_folder / 'scd_atoms.csv', index=False)
-    #
-    # print('summary table for chains...')
-    # df = pd.read_csv(scd_folder / 'scd_all_new.csv')
-    # chain_summary = df.groupby(['system', 'chain'], as_index=False).agg(
-    #     'mean').rename({'scd': 'mean'}, axis=1)
-    # chain_summary = chain_summary.assign(std=df.groupby(
-    #     ['system', 'chain']).agg(np.std)['scd'].values)
-    # chain_summary.to_csv(scd_folder / 'scd_chains.csv', index=False)
-
-
-# def integral_summary(infile: PosixPath,
-#                      outfile: PosixPath,
-#                      index=None) -> None:
-#     '''
-#     move chol rows to new columns and calculate relative_changes
-#     '''
-#     def move_chol_rows_to_new_columns(
-#             infile: PosixPath,
-#             outfile: PosixPath,
-#             index=None) -> None:
-#         '''
-#         system       | val          system | chol0 | chol10 | chol30 | chol50
-#         popc            1           popc       1        2        3        4
-#         popc_chol10     2      ->
-#         popc_chol30     3
-#         popc_chol50     4
-#
-#         concat dataframes by 'index' argument
-#         '''
-#
-#         if index is None:
-#             index = ['system']
-#
-#         df = pd.read_csv(infile)
-#         df.sort_values('system', inplace=True, ignore_index=True)
-#
-#         df_parts = []
-#         for i in [10, 30, 50]:
-#             df_part = df[df['system'].str.contains(
-#                 f'_chol{i}')].copy().reset_index(drop=True)
-#             df_part['system'] = pd.Series(
-#                 ['_'.join(i.split('_')[:-1]) for i in df_part.loc[:, 'system']])
-#             df_part.columns = ['system'] + \
-#                 [f'{name}_chol{i}' if not name in index else name for name in df_part.columns[1:]]
-#             df_parts.append(df_part)
-#
-#         df.drop(df[df['system'].str.contains('chol')].index, inplace=True)
-#         df.reset_index(drop=True, inplace=True)
-#
-#         df_concat = pd.concat([df.set_index(index)] +
-#                               [i.set_index(index) for i in df_parts], axis=1)
-#
-#         df_concat.to_csv(outfile)
-#
-#     def calculate_relative_changes(infile: PosixPath, n_of_index_cols: int = 1) -> None:
-#         '''
-#         calculate relative changes for parameters and save them as new file in the same directory
-#         '''
-#         df = pd.read_csv(infile, index_col=list(range(n_of_index_cols)))
-#         df2 = pd.DataFrame(index=df.index)
-#         for i in [10, 30, 50]:
-#             df2[f'mean_chol{i}'] = (
-#                 df[f'mean_chol{i}'] - df['mean']) / df['mean'] * 100
-#             df2[f'std_chol{i}'] = np.sqrt(np.abs(
-#                 (df[f'std_chol{i}']**2 * df['mean']**2
-#                  - df['std']**2 * df[f'mean_chol{i}']**2) / df['mean']**4)) * 100
-#         df2.to_csv(str(infile).split('.', maxsplit=1)
-#                    [0] + '_relative_changes.csv')
-#     move_chol_rows_to_new_columns(infile, outfile, index)
-#     if index is None:
-#         calculate_relative_changes(outfile, 1)
-#     else:
-#         calculate_relative_changes(outfile, len(index))
 
 
 def lists_of_values_to_df(func: Callable, trj_slices: list[TrajectorySlice]) -> pd.DataFrame:
@@ -859,26 +458,24 @@ def plot_dp_by_exp(experiments, trj_slices: list[TrajectorySlice]) -> None:
     systems with different amounts of CHL.
     plots systems from the same experiment on one figure
     '''
-    trj_slices_chol = [s for s in trj_slices if 'chol' in s.system.name]
-    path, b, e, dt = trj_slices[0].system.path, trj_slices[0].b, trj_slices[0].e, trj_slices[0].dt
     for exp, systs in experiments.items():
         fig, axs = plt.subplots(1, 3, figsize=(
             21, 7), sharex=True, sharey=True)
-        reds = sns.color_palette('Reds_r', 3)
-        purples = sns.color_palette('Purples_r', 3)
-        blues = sns.color_palette('Blues_r', 3)
         plotted = []
         for syst, ax in zip(systs, axs):
             c = 0  # for choosing colors
-            for trj in trj_slices_chol:
+            for trj in [s for s in trj_slices if 'chol' in s.system.name]:  # trj_slices_chol
                 if trj.system.name.rsplit('_', 1)[0] == syst and str(trj.system) not in plotted:
                     l = f'{trj.system.name.split("chol", 1)[1]} % CHL'
                     plot_density_profile(
-                        ax, trj, groups=['chols'], color=purples[c], label=l)
+                        ax, trj, groups=['chols'],
+                        color=sns.color_palette('Purples_r', 3)[c], label=l)
                     plot_density_profile(
-                        ax, trj, groups=['chols_o'], color=blues[c], label=l)
+                        ax, trj, groups=['chols_o'],
+                        color=sns.color_palette('Blues_r', 3)[c], label=l)
                     plot_density_profile(
-                        ax, trj, groups=['phosphates'], color=reds[c], label=l)
+                        ax, trj, groups=['phosphates'],
+                        color=sns.color_palette('Reds_r', 3)[c], label=l)
                     plotted.append(str(trj.system))
                     ax.set_title(trj.system.name.rsplit('_', 1)[0])
                     c += 1
@@ -887,8 +484,9 @@ def plot_dp_by_exp(experiments, trj_slices: list[TrajectorySlice]) -> None:
         handles, labels = axs[0].get_legend_handles_labels()
         fig.legend(handles, labels)
         fig.suptitle(exp, fontsize=16)
-        plt.savefig(path / 'notebooks' / 'integral_parameters' /
-                    f'{"_".join(exp.split())}_dp_{b}_{e}_{dt}.png',
+        plt.savefig(trj_slices[0].system.path / 'notebooks' / 'integral_parameters' /
+                    f'{"_".join(exp.split())}_'
+                    f'dp_{trj_slices[0].b}_{trj_slices[0].e}_{trj_slices[0].dt}.png',
                     bbox_inches='tight')
         plt.close()
 
@@ -1026,25 +624,6 @@ def main():
     if args.plot is not None:
         for arg in args.plot:
             to_plot.get(arg, lambda: 'Invalid')(experiments, trj_slices)
-
-    #
-    # if args.chl_peak_width:
-    #     print('obtaining chols peak widths...')
-    #     lists_of_values_to_df(density_peak_widths_chols, trj_slices_chol).to_csv(
-    #         path / 'notebooks' / 'chl_peak_widths' / 'chols_peak_widths.csv', index=False)
-    #     print('done.')
-    #
-    # if args.plot_dps:
-    #     print('plotting density profiles...')
-    #     sns.set_palette('bright')
-    #     for trj in trj_slices:
-    #         fig, ax=plt.subplots(figsize=(7, 7))
-    #         plot_density_profile(ax, trj)
-    #         fig.patch.set_facecolor('white')
-    #         plt.savefig(f'{path}/notebooks/dp/'
-    #                     f'{trj.system}_{trj.b}-{trj.e}-{trj.dt}_dp.png',
-    #                     bbox_inches='tight', facecolor=fig.get_facecolor())
-    #         plt.close()
 
 
 if __name__ == '__main__':
