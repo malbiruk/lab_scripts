@@ -102,7 +102,7 @@ def relaxation(chol_impact, gmxl, system_name):
         os.makedirs(i, exist_ok=True)
     print(gmx_version())
     cmd = gmxl + ' && gmx grompp -f em.mdp -c indata/system.gro ' \
-        '-r indata/system.gro -n indata/grps.ndx -p indata/system.top -o em/em.tpr'
+        '-r indata/system.gro -n indata/grps.ndx -p indata/system.top -o em/em.tpr -maxwarn 2'
     realtime_output(cmd)
 
     os.chdir(system_directory + 'em')
@@ -116,7 +116,7 @@ def relaxation(chol_impact, gmxl, system_name):
         cmd = gmxl + ' && gmx grompp -n ../indata/grps.ndx ' \
             f'-f ../{i}.mdp -c ../{dirs[c-1]}/{dirs[c-1]}.gro ' \
             f'-r ../{dirs[c-1]}/{dirs[c-1]}.gro ' \
-            f'-p ../indata/system.top -o {i} -maxwarn 1 && ' \
+            f'-p ../indata/system.top -o {i} -maxwarn 2 && ' \
             f'gmx mdrun -deffnm {i} -v'
         realtime_output(cmd)
         if not os.path.exists(system_directory + f'{dirs[c-1]}/{dirs[c-1]}.gro'):
@@ -145,7 +145,7 @@ def md(chol_impact, gmxl, system_name, time):
         os.makedirs('md', exist_ok=True)
         print(gmx_version())
         cmd = gmxl + '&& gmx grompp -f md.mdp -c pr4/pr4.gro ' \
-            '-r pr4/pr4.gro -n indata/grps.ndx -p indata/system.top -o md/md.tpr'
+            '-r pr4/pr4.gro -n indata/grps.ndx -p indata/system.top -o md/md.tpr -maxwarn 2'
         realtime_output(cmd)
 
         os.chdir(system_directory + 'md')
@@ -164,7 +164,7 @@ def md(chol_impact, gmxl, system_name, time):
 def main():
     chol_impact = '/home/klim/Documents/chol_impact/'
     impulse = '/nfs/belka2/soft/impulse/dev/inst/runtask.py'
-    gmxl = '. `ls -t /usr/local/gromacs*/bin/GMXRC | head -n 1 `'
+    gmxl = '. /usr/local/gromacs-2020.6/bin/GMXRC'
 
     parser = argparse.ArgumentParser(
         description='Create system, start relaxation and md for "system_name"')
