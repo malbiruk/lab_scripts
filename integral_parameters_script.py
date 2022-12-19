@@ -21,7 +21,8 @@ from scipy import integrate
 from scipy.optimize import curve_fit
 import MDAnalysis as mda
 
-from modules.general import opener, multiproc, flatten, sparkles, duration, calc_1d_com
+from modules.general import opener, multiproc, flatten, sparkles
+from modules.general import duration, calc_1d_com, get_keys_by_value
 from modules.traj import System, TrajectorySlice
 from modules.density import get_densities, plot_density_profile
 from modules.density import calculate_distances_between_density_groups
@@ -308,21 +309,154 @@ def density(trj_slices: list[TrajectorySlice]) -> None:
     print('done.')
 
 
-def plot_violins(csv: PosixPath, y: str, x: str = 'system',
-                 hue: str = 'CHL amount, %', split=False) -> None:
+# def plot_violins(csv: PosixPath, y: str, x: str = 'system',
+#                  hue: str = 'CHL amount, %', split=False) -> None:
+#     '''
+#     plot violinplot for distribution of parameters
+#     '''
+#     df = pd.read_csv(csv)
+#     _, _ = plt.subplots(figsize=(10, 7))
+#     sns.violinplot(data=df, x=x, y=y, hue=hue,
+#                    cut=0, palette='RdYlGn_r', split=split, inner='quartile')
+#     plt.savefig(str(csv).split('.', 1)[0] + '.png',
+#                 bbox_inches='tight')
+#     plt.close()
+
+
+def calculate_relative_changes(df: pd.DataFrame) -> pd.DataFrame:
     '''
-    plot violinplot for distribution of parameters
+    incoming dataframe should have columns 'experiment', 'system', 'CHL amount, %'
+    and one column with data
+    this function calculates relative changes inside each experiment for each bilayer
+    with changing CHL amount
     '''
+    df_relative = df.groupby(['experiment', 'system', 'CHL amount, %'],
+                             as_index=False).agg(['mean', 'std']).reset_index()
+    df_relative.columns = ['experiment',
+                           'system', 'CHL amount, %', 'mean', 'std']
+
+    def diff_mean(x: pd.Series) -> np.ndarray:
+        '''
+        calculates difference between n and n+1 row in Series in percents
+        '''
+        def rel_m(val1, val2):
+            return((val2 - val1) / val1 * 100)
+        vals = [rel_m(x[n], x[n + 1]) for n in range(x.shape[0] - 1)]
+        ret = list([np.nan])  # pad return vector however you need to
+        ret = ret + vals
+        return(ret)
+
+    def diff_std(x: pd.Series, y: pd.Series) -> np.ndarray:
+        '''
+        calculates std between n and n+1 row in Series in percents
+        '''
+        def rel_s(s1, s2, m1, m2):
+            return(np.sqrt(np.abs((s2**2 * m1**2 - s1**2 * m2**2) / m1**4)) * 100)
+        vals = [rel_s(x[n], x[n + 1], y[n], y[n + 1])
+                for n in range(x.shape[0] - 1)]
+        ret = list([np.nan])  # pad return vector however you need to
+        ret = ret + vals
+        return(ret)
+
+    df_relative['relative mean, %'] = df_relative.loc[:,
+                                                      ['mean']].apply(diff_mean)
+    df_relative.loc[df_relative[df_relative['CHL amount, %'] ==
+                                df_relative['CHL amount, %'].min()]['relative mean, %'].index,
+                    'relative mean, %'] = 0
+    df_relative['relative std'] = df_relative.loc[:, [
+        'std']].apply(diff_std, y=df_relative['mean'])
+    df_relative.loc[df_relative[df_relative['CHL amount, %'] ==
+                                df_relative['CHL amount, %'].min()]['relative std'].index,
+                    'relative std'] = 0
+    return df_relative.sort_values(['CHL amount, %'])
+
+
+def plot_violins(csv: PosixPath, y: str, experiments: dict, to_rus: dict) -> None:
+    '''
+    plot violinplot for distribution of parameters by experiment
+    and barplot for relative changes
+    also save russian version
+    '''
+    def plots(df: pd.DataFrame, csv: PosixPath, y: str, to_rus: dict, rus: bool) -> None:
+        '''
+        translate everything to rus (optionally) and plot violins and relative changes plots
+        '''
+        df_relative = calculate_relative_changes(df)
+
+        if rus:
+            df['system'] = df['system'].apply(lambda x: to_rus[x])
+            df['experiment'] = df['experiment'].apply(lambda x: to_rus[x])
+            df.rename(columns={'system': 'Система',
+                      y: to_rus[y]}, inplace=True)
+            df_relative['system'] = df_relative['system'].apply(
+                lambda x: to_rus[x])
+            df_relative['experiment'] = df_relative['experiment'].apply(
+                lambda x: to_rus[x])
+            df_relative.rename(columns={'system': 'Система',
+                                        'relative mean, %': 'Относительное изменение, %'}, inplace=True)
+
+        x = 'Система' if rus else 'system'
+        y = to_rus[y] if rus else y
+        legend_title = 'Содержание ХС, %' if rus else 'CHL amount, %'
+        y2 = 'Относительное изменение, %' if rus else 'relative mean, %'
+        out = '_rus' if rus else ''
+
+        g = sns.FacetGrid(df, col='experiment', height=7,
+                          aspect=0.75, sharex=False, dropna=True)
+        g.map_dataframe(sns.violinplot, x=x, y=y, hue='CHL amount, %',
+                        cut=0, palette='RdYlGn_r', inner='quartile')
+        g.axes[0][-1].legend(title=legend_title)
+        # g.add_legend(title=legend_title)
+        g.set_titles(col_template='{col_name}')
+
+        plt.savefig(str(csv).split('.', 1)[0] + out + '.png',
+                    bbox_inches='tight')
+        plt.close()
+
+        # plot relative changes
+        g = sns.FacetGrid(df_relative, col='experiment', height=7,
+                          aspect=0.75, sharex=False, dropna=True)
+        g.map_dataframe(sns.barplot, x=x, y=y2, hue='CHL amount, %',
+                        palette='RdYlGn_r', ec='k')
+        g.axes[0][-1].legend(title=legend_title)
+        # g.add_legend(title=legend_title)
+        g.set_titles(col_template='{col_name}')
+        for ax, exp in zip(g.axes[0], df_relative['experiment'].unique()):
+            x_coords = [p.get_x() + 0.5 * p.get_width() for p in ax.patches]
+            y_coords = [p.get_height() for p in ax.patches]
+            yerr = []
+            c = 0
+            for i in y_coords:
+                if np.isnan(i):
+                    yerr.append(np.nan)
+                else:
+                    yerr.append(
+                        df_relative[df_relative['experiment'] == exp]['relative std'].tolist()[c])
+                    c += 1
+            ax.errorbar(x=x_coords, y=y_coords, yerr=yerr, fmt='none', c='k')
+        plt.savefig(str(csv).split('.', 1)[0] + '_relative' + out + '.png',
+                    bbox_inches='tight')
+        plt.close()
+
     df = pd.read_csv(csv)
-    _, _ = plt.subplots(figsize=(10, 7))
-    sns.violinplot(data=df, x=x, y=y, hue=hue,
-                   cut=0, palette='RdYlGn_r', split=split, inner='quartile')
-    plt.savefig(str(csv).split('.', 1)[0] + '.png',
-                bbox_inches='tight')
-    plt.close()
+    # FIXME droppig wrong dspc for now
+    df = df[(df['system'] != 'dspc') | (
+        (df['CHL amount, %'] != 10) & (df['CHL amount, %'] != 50))]
+
+    df = df[df.columns.intersection(
+        ['system', 'experiment', 'CHL amount, %', y])]
+
+    df['experiment'] = df['system'].apply(
+        lambda x: get_keys_by_value(x, experiments))
+    df = df.explode('experiment')
+    order = {'dmpc': 0, 'dppc_325': 1, 'dspc': 2, 'popc': 3,
+             'dopc': 4, 'dopc_dops50': 5, 'dops': 6}
+    df = df.sort_values(by=['system'], key=lambda x: x.map(order))
+    plots(df, csv, y, to_rus, False)
+    plots(df, csv, y, to_rus, True)
 
 
-def thickness(trj_slices: list[TrajectorySlice]) -> None:
+def thickness(trj_slices: list[TrajectorySlice], experiments: dict, to_rus: dict) -> None:
     '''
     apply calculate_thickness function to list of trajectories and plot results as violinplot
     '''
@@ -334,11 +468,11 @@ def thickness(trj_slices: list[TrajectorySlice]) -> None:
         path / 'notebooks' / 'integral_parameters' / f'thickness_{b}-{e}-{dt}.csv', index=False)
     print('plotting results...')
     plot_violins(path / 'notebooks' / 'integral_parameters' / f'thickness_{b}-{e}-{dt}.csv',
-                 'thickness, nm')
+                 'thickness, nm', experiments, to_rus)
     print('done.')
 
 
-def arperlip(trj_slices: list[TrajectorySlice]) -> None:
+def arperlip(trj_slices: list[TrajectorySlice], experiments: dict, to_rus: dict) -> None:
     '''
     apply calculate_area_per_lipid function to list of trajectories and plot results as violinplot
     '''
@@ -349,11 +483,11 @@ def arperlip(trj_slices: list[TrajectorySlice]) -> None:
         path / 'notebooks' / 'integral_parameters' / f'arperlip_{b}-{e}-{dt}.csv', index=False)
     print('plotting results...')
     plot_violins(path / 'notebooks' / 'integral_parameters' / f'arperlip_{b}-{e}-{dt}.csv',
-                 'area per lipid, nm²')
+                 'area per lipid, nm²', experiments, to_rus)
     print('done.')
 
 
-def scd(trj_slices: list[TrajectorySlice]) -> None:
+def scd(trj_slices: list[TrajectorySlice], experiments: dict, to_rus: dict) -> None:
     '''
     apply calculate_scd function to list of trajectories,
     unite data of several systems into one file
@@ -368,7 +502,7 @@ def scd(trj_slices: list[TrajectorySlice]) -> None:
         path / 'notebooks' / 'integral_parameters' / f'scd_{b}-{e}-{dt}.csv', index=False)
     print('plotting results...')
     plot_violins(path / 'notebooks' / 'integral_parameters' / f'scd_{b}-{e}-{dt}.csv',
-                 'scd')
+                 'scd', experiments, to_rus)
     print('done.')
 
 
@@ -397,7 +531,7 @@ def chl_tilt_summary(trj_slices: list[TrajectorySlice]) -> None:
     return df.explode(['timepoint', 'chl_index', 'α, °'])
 
 
-def chl_tilt_angle(trj_slices: list[TrajectorySlice]) -> None:
+def chl_tilt_angle(trj_slices: list[TrajectorySlice], experiments: dict, to_rus: dict) -> None:
     '''
     apply get_chl_tilt function to list of trajectories,
     split each system into components (plot + save parameters),
@@ -410,8 +544,12 @@ def chl_tilt_angle(trj_slices: list[TrajectorySlice]) -> None:
     with ProcessPoolExecutor(max_workers=8) as executor:
         executor.map(get_chl_tilt, trj_slices)
     print('saving chl tilt angles...')
-    chl_tilt_summary(trj_slices).to_csv(
+    df = chl_tilt_summary(trj_slices)
+    df.to_csv(
         path / 'notebooks' / 'integral_parameters' / f'chl_tilt_{b}-{e}-{dt}.csv', index=False)
+    df['α, °'] = df['α, °'].apply(lambda x: np.abs(x))
+    df.to_csv(
+        path / 'notebooks' / 'integral_parameters' / 'chl_tilt_to_plot.csv', index=False)
     print('plotting chol tilts and splitting into components...')
     for trj in trj_slices:
         if not Path(f'{trj.system.path}/notebooks/chol_tilt/'
@@ -426,12 +564,13 @@ def chl_tilt_angle(trj_slices: list[TrajectorySlice]) -> None:
                         bbox_inches='tight', facecolor=fig.get_facecolor())
             plt.close()
     print('plotting results...')
-    plot_violins(path / 'notebooks' / 'integral_parameters' / f'chl_tilt_{b}-{e}-{dt}.csv',
-                 'α, °')
+
+    plot_violins(path / 'notebooks' / 'integral_parameters' / 'chl_tilt_to_plot.csv',
+                 'α, °', experiments, to_rus)
     print('done.')
 
 
-def chl_p_distance(trj_slices: list[TrajectorySlice]) -> None:
+def chl_p_distance(trj_slices: list[TrajectorySlice], experiments: dict, to_rus: dict) -> None:
     '''
     apply calc_chols_p_dist and calc_chols_o_p_dist functions to list of trajectories,
     unite data of several systems into one file
@@ -451,18 +590,25 @@ def chl_p_distance(trj_slices: list[TrajectorySlice]) -> None:
         f'chols_o_phosphates_distances_{b}-{e}-{dt}.csv', index=False)
     print('plotting results...')
     plot_violins(path / 'notebooks' / 'integral_parameters' /
-                 f'chols_phosphates_distances_{b}-{e}-{dt}.csv', 'distance, nm')
+                 f'chols_phosphates_distances_{b}-{e}-{dt}.csv', 'distance, nm',
+                 experiments, to_rus)
     plot_violins(path / 'notebooks' / 'integral_parameters' /
-                 f'chols_o_phosphates_distances_{b}-{e}-{dt}.csv', 'distance, nm')
+                 f'chols_o_phosphates_distances_{b}-{e}-{dt}.csv', 'distance, nm',
+                 experiments, to_rus)
     print('done.')
 
 
-def plot_dp_by_exp(experiments, trj_slices: list[TrajectorySlice]) -> None:
+def plot_dp_by_exp(experiments, trj_slices: list[TrajectorySlice], to_rus: dict, rus: bool) -> None:
     '''
     plots chol chol_o amd phosphates density profiles on same axis for
     systems with different amounts of CHL.
     plots systems from the same experiment on one figure
     '''
+    chl = 'ХС' if rus else 'CHL'
+    ylabel = 'Плотность, кг/м³' if rus else 'Density, kg/m³'
+    xlabel = 'Z, нм' if rus else 'Z, nm'
+    out = '_rus' if rus else ''
+
     for exp, systs in experiments.items():
         fig, axs = plt.subplots(1, 3, figsize=(
             21, 7), sharex=True, sharey=True)
@@ -471,32 +617,40 @@ def plot_dp_by_exp(experiments, trj_slices: list[TrajectorySlice]) -> None:
             c = 0  # for choosing colors
             for trj in [s for s in trj_slices if 'chol' in s.system.name]:  # trj_slices_chol
                 if trj.system.name.rsplit('_', 1)[0] == syst and str(trj.system) not in plotted:
-                    l = f'{trj.system.name.split("chol", 1)[1]} % CHL'
+                    l = f'{trj.system.name.split("chol", 1)[1]} % ' + chl
                     plot_density_profile(
                         ax, trj, groups=['chols'],
-                        color=sns.color_palette('Purples_r', 3)[c], label=l)
+                        color=sns.color_palette('Purples_r', 3)[c], label=chl + ', ' + l)
                     plot_density_profile(
                         ax, trj, groups=['chols_o'],
-                        color=sns.color_palette('Blues_r', 3)[c], label=l)
+                        color=sns.color_palette('Blues_r', 3)[c], label=chl + ' O, ' + l)
                     plot_density_profile(
                         ax, trj, groups=['phosphates'],
-                        color=sns.color_palette('Reds_r', 3)[c], label=l)
+                        color=sns.color_palette('Reds_r', 3)[c], label='PO4, ' + l)
                     plotted.append(str(trj.system))
-                    ax.set_title(trj.system.name.rsplit('_', 1)[0])
+                    if rus:
+                        ax.set_title(to_rus[trj.system.name.rsplit('_', 1)[0]])
+                    else:
+                        ax.set_title(trj.system.name.rsplit('_', 1)[0])
                     c += 1
+            ax.set_xlabel(xlabel)
         for i in axs[1:]:
             i.set_ylabel('')
+        axs[0].set_ylabel(ylabel)
         handles, labels = axs[0].get_legend_handles_labels()
         fig.legend(handles, labels)
-        fig.suptitle(exp, fontsize=16)
+        if rus:
+            fig.suptitle(to_rus[exp], fontsize=20)
+        else:
+            fig.suptitle(exp, fontsize=20)
         plt.savefig(trj_slices[0].system.path / 'notebooks' / 'integral_parameters' /
                     f'{"_".join(exp.split())}_'
-                    f'dp_{trj_slices[0].b}_{trj_slices[0].e}_{trj_slices[0].dt}.png',
+                    f'dp_{trj_slices[0].b}_{trj_slices[0].e}_{trj_slices[0].dt}{out}.png',
                     bbox_inches='tight')
         plt.close()
 
 
-def density_profiles(experiments: dict, trj_slices: list[TrajectorySlice]) -> None:
+def density_profiles(experiments: dict, trj_slices: list[TrajectorySlice], to_rus: dict) -> None:
     '''
     plots density profile for each trajectory
     calculates chl peak widths and plots it
@@ -525,13 +679,14 @@ def density_profiles(experiments: dict, trj_slices: list[TrajectorySlice]) -> No
     print('plotting chols peak widths...')
     plot_violins(path / 'notebooks' / 'integral_parameters' /
                  f'chols_peak_widths_{b}-{e}-{dt}.csv',
-                 'peak width, nm')
+                 'peak width, nm', experiments, to_rus)
     print('plotting dp by experiment...')
-    plot_dp_by_exp(experiments, trj_slices)
+    plot_dp_by_exp(experiments, trj_slices, to_rus, False)
+    plot_dp_by_exp(experiments, trj_slices, to_rus, True)
     print('done.')
 
 
-def plot_scd_atoms(experiments: dict, trj_slices: list[TrajectorySlice]) -> None:
+def plot_scd_atoms(experiments: dict, trj_slices: list[TrajectorySlice], to_rus: dict) -> None:
     '''
     plot per atom scd data for each system (different amount of CHL),
     one file per experiment.
@@ -544,16 +699,16 @@ def plot_scd_atoms(experiments: dict, trj_slices: list[TrajectorySlice]) -> None
                   & (df['chain'] == chain)
                   & (df['CHL amount, %'] == chl_amount)]
 
-    def scd_plot(scd_ms: pd.DataFrame, exp: str, systs: tuple) -> None:
+    def scd_plot(scd_ms: pd.DataFrame, exp: str, systs: tuple, to_rus: dict, rus: bool) -> None:
         '''
         plot scd data of one experiment
         '''
+        out = '_rus' if rus else ''
+        chl = 'ХС' if rus else 'CHL'
         scd_ms_part = scd_ms[scd_ms['system'].str.fullmatch('|'.join(systs))]
         fig, axs = plt.subplots(1, 3, figsize=(
             21, 7), sharex=True, sharey=True)
         for s,  ax in zip(systs, axs):
-            ax.set_title(s)
-            ax.set_xlabel('C atom number')
             for c, chl in enumerate((0, 10, 30, 50)):
                 for sn, ls in zip(('sn-1', 'sn-2'),
                                   ('-', '--')):
@@ -562,21 +717,33 @@ def plot_scd_atoms(experiments: dict, trj_slices: list[TrajectorySlice]) -> None
                                 yerr=dfol(scd_ms_part, s, sn, chl)[
                         'scd']['std'],
                         ls=ls, color=sns.color_palette('cubehelix')[c],
-                        elinewidth=1, label=f'{chl} % CHL, {sn}'
+                        elinewidth=1, label=f'{chl} % {chl}, {sn}'
                     )
+            s = to_rus[s] if rus else s
+            ax.set_title(s)
+            if rus:
+                ax.set_xlabel('Номер атома углерода')
+            else:
+                ax.set_xlabel('C atom number')
         axs[0].set_ylabel('Scd')
         handles, labels = axs[0].get_legend_handles_labels()
         fig.legend(handles, labels)
-        fig.suptitle(exp)
+        if rus:
+            fig.suptitle(to_rus[exp])
+        else:
+            fig.suptitle(exp)
         plt.savefig(trj_slices[0].system.path / 'notebooks' / 'integral_parameters' /
                     f'{"_".join(exp.split())}_'
-                    f'scd_{trj_slices[0].b}_{trj_slices[0].e}_{trj_slices[0].dt}.png',
+                    f'scd_{trj_slices[0].b}_{trj_slices[0].e}_{trj_slices[0].dt}{out}.png',
                     bbox_inches='tight')
         plt.close()
 
     path, b, e, dt = trj_slices[0].system.path, trj_slices[0].b, trj_slices[0].e, trj_slices[0].dt
     df = pd.read_csv(path / 'notebooks' /
                      'integral_parameters' / f'scd_{b}-{e}-{dt}.csv')
+    # FIXME dropping dspc for now
+    df = df[(df['system'] != 'dspc') | (
+        (df['CHL amount, %'] != 10) & (df['CHL amount, %'] != 50))]
     df['atom_n'] = df['atom'].apply(lambda x: int(x[2:]))
     # df.sort_values(['system', 'CHL amount, %', 'chain', 'atom_n'], inplace=True)
     scd_ms = df.drop(columns=['timepoint', 'atom']).groupby(
@@ -588,7 +755,8 @@ def plot_scd_atoms(experiments: dict, trj_slices: list[TrajectorySlice]) -> None
     print('plotting scd by experiment...')
 
     for exp, systs in experiments.items():
-        scd_plot(scd_ms, exp, systs)
+        scd_plot(scd_ms, exp, systs, to_rus, False)
+        scd_plot(scd_ms, exp, systs, to_rus, True)
     print('done.')
 
 
@@ -716,15 +884,17 @@ def angl_dens_multiple_plot(experiments: dict,
                              stat='density')
                 try:
                     plot_density_profile(ax,
-                                     TrajectorySlice(
-                                         System(trj_slices[0].system.path, s),
-                                         trj_slices[0].b, trj_slices[0].e, trj_slices[0].dt),
-                                     groups=['chols'], color='k')
+                                         TrajectorySlice(
+                                             System(
+                                                 trj_slices[0].system.path, s),
+                                             trj_slices[0].b, trj_slices[0].e, trj_slices[0].dt),
+                                         groups=['chols'], color='k')
                     plot_density_profile(ax,
-                                     TrajectorySlice(
-                                         System(trj_slices[0].system.path, s),
-                                         trj_slices[0].b, trj_slices[0].e, trj_slices[0].dt),
-                                     groups=['phosphates'], color='C3')
+                                         TrajectorySlice(
+                                             System(
+                                                 trj_slices[0].system.path, s),
+                                             trj_slices[0].b, trj_slices[0].e, trj_slices[0].dt),
+                                         groups=['phosphates'], color='C3')
                 except FileNotFoundError as e:
                     print(e)
 
@@ -747,7 +917,7 @@ def angl_dens_multiple_plot(experiments: dict,
                     bbox_inches='tight')
 
 
-def plot_angles_density(experiments: dict, trj_slices: list[TrajectorySlice]) -> None:
+def plot_angles_density(experiments: dict, trj_slices: list[TrajectorySlice], to_rus: dict) -> None:
     '''
     calculate percentage of chl tilt horizontal component in systems
     and plot it together with density plots;
@@ -762,10 +932,18 @@ def plot_angles_density(experiments: dict, trj_slices: list[TrajectorySlice]) ->
     print('plotting horizontal component distribution of angles with CHL density profiles...')
     angl_dens_multiple_plot(experiments, trj_slices, df,
                             '% of horizontal component', 'hor_comp')
-    # print('plotting tilt distribution of angles with CHL density profiles...')
-    # angl_dens_multiple_plot(experiments, trj_slices, df, 'α, °', 'tilt')
     print('done.')
 
+
+# def calculate_relative_changes():
+#     df2[f'chol{i} change (%)'] = (
+#         df[f'mean_chol{i}'] - df['mean']) / df['mean'] * 100
+#     df2[f'chol{i} change (%) std'] = np.sqrt(np.abs(
+#         (df[f'std_chol{i}']**2 * df['mean']**2
+#          - df['std']**2 * df[f'mean_chol{i}']**2) / df['mean']**4)) * 100
+
+
+# %%
 
 def parse_args():
     '''
@@ -790,11 +968,14 @@ def parse_args():
                         '"scd_atoms" -- scd per atom for systems,\n'
                         '"angles_density" -- density profiles with percentage '
                         'of horizontal component.')
-    parser.add_argument('--b', type=int, default=150,
+    parser.add_argument('--rus',
+                        action='store_true',
+                        help='plot graphs with russian captions.')
+    parser.add_argument('-b', '--b', type=int, default=150,
                         help='beginning time in ns')
-    parser.add_argument('--e', type=int, default=200,
+    parser.add_argument('-e', '--e', type=int, default=200,
                         help='ending time in ns')
-    parser.add_argument('--dt', type=int, default=1000,
+    parser.add_argument('-dt', '--dt', type=int, default=1000,
                         help='dt in ps')
 
     if len(sys.argv) < 2:
@@ -818,16 +999,34 @@ def main():
         'chain saturation': ('dppc_325', 'popc', 'dopc'),
         'head polarity': ('dopc', 'dopc_dops50', 'dops'),
     }
+
+    to_rus = {'dmpc': 'ДМФХ', 'dppc_325': 'ДПФХ', 'dspc': 'ДСФХ', 'popc': 'ПОФХ',
+              'dopc': 'ДОФХ', 'dops': 'ДОФС', 'dopc_dops50': 'ДОФХ/ДОФС',
+              'chain length': 'Длина ацильных цепей',
+              'chain saturation': 'Насыщенность ацильных цепей',
+              'head polarity': 'Полярность "головок"',
+              'thickness, nm': 'Толщина, нм',
+              'area per lipid, nm²': 'Средняяя площадь на липид, нм²',
+              'scd': 'Scd', 'peak width, nm': 'Ширина пиков профилей плотности ХС, нм',
+              'α, °': 'α, °'
+              }
+
     systems = flatten([(i, i + '_chol10', i + '_chol30', i + '_chol50')
                        for i in flatten(experiments.values())])
     systems.remove('dopc_dops50_chol50')
     systems.remove('dopc_dops50')
 
+    # trj_slices = [TrajectorySlice(
+    #     System(path, s), 150, 200, 1000) for s in systems]
     trj_slices = [TrajectorySlice(
         System(path, s), args.b, args.e, args.dt) for s in systems]
     # FIXME: delete after dopc_dops50 will be calculated
-    trj_slices.append(TrajectorySlice(
-        System(path, 'dopc_dops50'), 4, 54, 1000))
+    # trj_slices.append(TrajectorySlice(
+    #     System(path, 'dopc_dops50'), 4, 54, 1000))
+    trj_slices.remove(TrajectorySlice(
+        System(path, 'dspc_chol10'), args.b, args.e, args.dt))
+    trj_slices.remove(TrajectorySlice(
+        System(path, 'dspc_chol50'), args.b, args.e, args.dt))
 
     to_calc = {'density': density,
                'thickness': thickness,
@@ -842,11 +1041,13 @@ def main():
 
     if args.calculate is not None:
         for arg in args.calculate:
-            to_calc.get(arg, lambda: 'Invalid')(trj_slices)
+            to_calc.get(arg, lambda: 'Invalid')(
+                trj_slices, experiments, to_rus)
 
     if args.plot is not None:
         for arg in args.plot:
-            to_plot.get(arg, lambda: 'Invalid')(experiments, trj_slices)
+            to_plot.get(arg, lambda: 'Invalid')(
+                experiments, trj_slices, to_rus)
 
 
 if __name__ == '__main__':

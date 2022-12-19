@@ -17,6 +17,8 @@ import MDAnalysis as mda
 from MDAnalysis.analysis.leaflet import LeafletFinder
 
 
+# %%
+
 def mhpmap_obtainer(path, syst, b, e, dt, force=False):
     desired_datafile = path / 'notebooks' / 'mhpmaps' / \
         'data' / f'{syst}_{b}-{e}-{dt}_data.nmp'
@@ -545,6 +547,32 @@ def collect_mhp_clust(path, times, syst, deltat, dt, option, lt=False):
                 f'{path}/notebooks/mhpmaps/clust/{syst}_{t}-{t+deltat}-{dt}_{option}.txt'))
     return data
 
+# data_phob = [(syst, 'hydrophobic', collect_mhp_clust(
+#     chol_impact, times, syst, deltat, dt, 'hydrophobic')) for syst in systems_list]
+# data_phil = [(syst, 'hydrophilic', collect_mhp_clust(
+#     chol_impact, times, syst, deltat, dt, 'hydrophilic')) for syst in systems_list]
+# df = pd.DataFrame.from_records(data_phob + data_phil, columns=['system', 'cluster_type', 'cluster_size'])
+# df = df.explode('cluster_size')
+# df.system.unique()
+# df = df[df['system'].str.contains('20x20')==False].copy()
+# df.sort_values('system', inplace=True, ignore_index=True)
+# df['CHL amount, %'] = df['system'].str.split('_chol', n=1, expand=True)[1]
+# df['system'] = df['system'].str.split('_chol', n=1, expand=True)[0]
+# df.replace(to_replace=[None], value=0, inplace=True)
+# df = df[(df['system'] != 'dspc') | (
+#     (df['CHL amount, %'] != 10) & (df['CHL amount, %'] != 50))]
+# from modules.general import get_keys_by_value
+# df['experiment'] = df['system'].apply(
+#     lambda x: get_keys_by_value(x, experiments))
+# df = df.explode('experiment')
+# df_p = df[df['cluster_type'] == 'hydrophobic']
+# g = sns.FacetGrid(df_p, col='experiment', height=7,
+#                   aspect=0.75, sharex=False)
+# g.map_dataframe(sns.violinplot, x='system', y='cluster_size', hue='CHL amount, %',
+#                 cut=0, palette='RdYlGn_r', inner='quartile')
+# g.axes[0][-1].legend(title='CHL amount, %')
+# g.set_titles(col_template='{col_name}')
+
 
 def plot_mhp_clust_kdeplots(path, experiments, exp, times, deltat, dt,
                             option='hydrophobic', lt=False):
@@ -626,6 +654,7 @@ def plot_mhp_clust_kdeplots(path, experiments, exp, times, deltat, dt,
     plt.savefig(path / 'notebooks' / 'mhpmaps' / 'imgs' /
                 fname, bbox_inches='tight', dpi=300)
 
+
 def duration(func):
     def inner(*args, **kwargs):
         start_time = datetime.now()
@@ -633,6 +662,7 @@ def duration(func):
         end_time = datetime.now()
         print('\n⌛ duration: {}'.format(end_time - start_time))
     return inner
+
 
 def sparkles(func):
     def inner(*args, **kwargs):
@@ -738,6 +768,9 @@ def main():
         'head polarity': ('dopc', 'dopc_dops20', 'dopc_dops30', 'dops'),
     }
 
+    # times = [49, 99, 149, 199]
+    # dt = 10
+    # deltat = 1
     times = [int(i) for i in args.times]
     dt = args.dt
     deltat = args.deltat

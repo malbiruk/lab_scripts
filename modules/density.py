@@ -149,7 +149,7 @@ def plot_density_profile(ax: axes._subplots.Axes,
         if label is None:
             ax.plot(x_, y_, label=gr, color=color)
         else:
-            ax.plot(x_, y_, label=f'{gr}, {label}', color=color)
+            ax.plot(x_, y_, label=f'{label}', color=color)
         ax.set_xlabel('Z, nm')
         ax.set_ylabel('Density, kg/m³')
 

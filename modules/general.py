@@ -41,6 +41,17 @@ def flatten(lst: list) -> list:
     return [item for sublist in lst for item in sublist]
 
 
+def get_keys_by_value(val, dict) -> tuple:
+    '''
+    get keys of dict (as tuple) by value
+    '''
+    res = []
+    for k,v in dict.items():
+        if val in v:
+            res.append(k)
+    return tuple(res)
+
+
 def calc_1d_com(x, m):
     '''
     calculate center of mass of 1D array
