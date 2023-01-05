@@ -950,8 +950,11 @@ def plot_angles_density(experiments: dict, trj_slices: list[TrajectorySlice], to
 # plt.ylabel('Плотность вероятности')
 # plt.xlabel('ɑ, °')
 # plt.savefig(trj.system.path / 'popc_chol30_comps.png', bbox_inches='tight')
+<<<<<<< HEAD
 
 
+=======
+>>>>>>> 288719e67a8d349c2e3588ff2251a51440b52b91
 # df = pd.read_csv(trj.system.path / 'notebooks' /
 #                  'integral_parameters' / 'tilt_density.csv')
 # y = '% of horizontal component'
