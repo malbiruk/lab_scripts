@@ -16,7 +16,18 @@ import seaborn as sns
 import MDAnalysis as mda
 from MDAnalysis.analysis.leaflet import LeafletFinder
 
-
+to_rus = {'dmpc': 'ДМФХ', 'dppc_325': 'ДПФХ', 'dspc': 'ДСФХ', 'popc': 'ПОФХ',
+          'dopc': 'ДОФХ', 'dops': 'ДОФС', 'dopc_dops50': 'ДОФХ/ДОФС',
+          'dopc_dops20': 'ДОФХ/ДОФС (20%)', 'dopc_dops30': 'ДОФХ/ДОФС (30%)',
+          'chain length': 'Длина ацильных цепей',
+          'chain saturation': 'Насыщенность ацильных цепей',
+          'head polarity': 'Полярность "головок"',
+          'thickness, nm': 'Толщина, нм',
+          'distance, nm': 'Расстояние, нм',
+          'area per lipid, nm²': 'Средняяя площадь на липид, нм²',
+          'scd': 'Scd', 'peak width, nm': 'Ширина пиков профилей плотности ХС, нм',
+          'α, °': 'α, °'
+          }
 # %%
 
 def mhpmap_obtainer(path, syst, b, e, dt, force=False):
@@ -112,26 +123,26 @@ def flatten(lst):
 
 def draw_bars(ax, df, systs, x, width, pos_definitions, pos, alpha, chl_label, show_label=False):
     if show_label:
-        ax.bar(pos_definitions[pos][0], df.loc[systs, 'phob_fr'], width,
-               yerr=df.loc[systs, 'phob_std'], capsize=5, label='phob ' + chl_label, color='C0', alpha=alpha)
-        ax.bar(pos_definitions[pos][1], df.loc[systs, 'neutr_fr'], width,
-               yerr=df.loc[systs, 'neutr_std'], capsize=5, label='neutr ' + chl_label, color='C1', alpha=alpha)
-        ax.bar(pos_definitions[pos][2], df.loc[systs, 'phil_fr'], width,
-               yerr=df.loc[systs, 'phil_std'], capsize=5, label='phil ' + chl_label, color='C2', alpha=alpha)
+        ax.bar(pos_definitions[pos][0], df.loc[systs, :]['phob_fr'], width,
+               yerr=df.loc[systs, :]['phob_std'], capsize=5, label='phob ' + chl_label, color='C0', alpha=alpha)
+        ax.bar(pos_definitions[pos][1], df.loc[systs, :]['neutr_fr'], width,
+               yerr=df.loc[systs, :]['neutr_std'], capsize=5, label='neutr ' + chl_label, color='C1', alpha=alpha)
+        ax.bar(pos_definitions[pos][2], df.loc[systs, :]['phil_fr'], width,
+               yerr=df.loc[systs, :]['phil_std'], capsize=5, label='phil ' + chl_label, color='C2', alpha=alpha)
     else:
-        ax.bar(pos_definitions[pos][0], df.loc[systs, 'phob_fr'], width,
-               yerr=df.loc[systs, 'phob_std'], capsize=5, color='C0', alpha=alpha)
-        ax.bar(pos_definitions[pos][1], df.loc[systs, 'neutr_fr'], width,
-               yerr=df.loc[systs, 'neutr_std'], capsize=5, color='C1', alpha=alpha)
-        ax.bar(pos_definitions[pos][2], df.loc[systs, 'phil_fr'], width,
-               yerr=df.loc[systs, 'phil_std'], capsize=5, color='C2', alpha=alpha)
+        ax.bar(pos_definitions[pos][0], df.loc[systs, :]['phob_fr'], width,
+               yerr=df.loc[systs, :]['phob_std'], capsize=5, color='C0', alpha=alpha)
+        ax.bar(pos_definitions[pos][1], df.loc[systs, :]['neutr_fr'], width,
+               yerr=df.loc[systs, :]['neutr_std'], capsize=5, color='C1', alpha=alpha)
+        ax.bar(pos_definitions[pos][2], df.loc[systs, :]['phil_fr'], width,
+               yerr=df.loc[systs, :]['phil_std'], capsize=5, color='C2', alpha=alpha)
 
-    ax.bar(pos_definitions[pos][0], df.loc[systs, 'phob_fr'], width,
-           yerr=df.loc[systs, 'phob_std'], capsize=5, ec='k', fill=False, lw=2)
-    ax.bar(pos_definitions[pos][1], df.loc[systs, 'neutr_fr'], width,
-           yerr=df.loc[systs, 'neutr_std'], capsize=5, ec='k', fill=False, lw=2)
-    ax.bar(pos_definitions[pos][2], df.loc[systs, 'phil_fr'], width,
-           yerr=df.loc[systs, 'phil_std'], capsize=5, ec='k', fill=False, lw=2)
+    ax.bar(pos_definitions[pos][0], df.loc[systs, :]['phob_fr'], width,
+           yerr=df.loc[systs, :]['phob_std'], capsize=5, ec='k', fill=False, lw=2)
+    ax.bar(pos_definitions[pos][1], df.loc[systs, :]['neutr_fr'], width,
+           yerr=df.loc[systs, :]['neutr_std'], capsize=5, ec='k', fill=False, lw=2)
+    ax.bar(pos_definitions[pos][2], df.loc[systs, :]['phil_fr'], width,
+           yerr=df.loc[systs, :]['phil_std'], capsize=5, ec='k', fill=False, lw=2)
 
 
 def draw_area_exp(ax, df, experiments, exp, show_label):
@@ -145,16 +156,16 @@ def draw_area_exp(ax, df, experiments, exp, show_label):
             4: (x - 3 * width, x + 1 * width, x + 5 * width),
         }
         draw_bars(ax, df, experiments[exp], x, width,
-                  pos_definitions, 1, 1, '0% CHL', show_label)
+                  pos_definitions, 1, 1, '0% ХС', show_label)
         draw_bars(ax, df, [i + '_chol10' for i in experiments[exp]],
                   x, width, pos_definitions,
-                  2, 0.5, '10% CHL', show_label)
+                  2, 0.5, '10% ХС', show_label)
         draw_bars(ax, df, [i + '_chol30' for i in experiments[exp]],
                   x, width, pos_definitions,
-                  3, 0.3, '30% CHL', show_label)
+                  3, 0.3, '30% ХС', show_label)
         draw_bars(ax, df, [i + '_chol50' for i in experiments[exp]],
                   x, width, pos_definitions,
-                  4, 0.1, '50% CHL', show_label)
+                  4, 0.1, '50% ХС', show_label)
 
     elif exp == 'head polarity':
         x = np.arange(len(experiments[exp]))
@@ -164,18 +175,18 @@ def draw_area_exp(ax, df, experiments, exp, show_label):
             2: (x - width, x + width, x + 3 * width),
         }
         draw_bars(ax, df, experiments[exp], x, width,
-                  pos_definitions, 1, 1, '0% CHL', show_label)
+                  pos_definitions, 1, 1, '0% ХС', show_label)
         draw_bars(ax, df, [i + '_chol30' for i in experiments[exp]],
                   x, width, pos_definitions,
-                  2, 0.3, '30% CHL', show_label)
+                  2, 0.3, '30% ХС', show_label)
 
     else:
         raise ValueError('unknown exp value')
 
     x = np.arange(len(experiments[exp]))
-    ax.set_title(exp)
+    ax.set_title(to_rus[exp])
     ax.xaxis.set_ticks(x)
-    ax.set_xticklabels(experiments[exp])
+    ax.set_xticklabels([to_rus[i] for i in experiments[exp]])
 
 
 def draw_chl_area_exp(ax, df, experiments, exp, show_label):
@@ -188,13 +199,13 @@ def draw_chl_area_exp(ax, df, experiments, exp, show_label):
             3: (x - 2 * width, x + width, x + 4 * width),
         }
         draw_bars(ax, df, [i + '_chol10' for i in experiments[exp]], x, width,
-                  pos_definitions, 1, 1, '10% CHL', show_label)
+                  pos_definitions, 1, 1, '10% ХС', show_label)
         draw_bars(ax, df, [i + '_chol30' for i in experiments[exp]],
                   x, width, pos_definitions,
-                  2, 0.5, '30% CHL', show_label)
+                  2, 0.5, '30% ХС', show_label)
         draw_bars(ax, df, [i + '_chol50' for i in experiments[exp]],
                   x, width, pos_definitions,
-                  3, 0.3, '50% CHL', show_label)
+                  3, 0.3, '50% ХС', show_label)
 
     elif exp == 'head polarity':
         x = np.arange(len(experiments[exp]))
@@ -204,15 +215,15 @@ def draw_chl_area_exp(ax, df, experiments, exp, show_label):
         }
         draw_bars(ax, df, [i + '_chol30' for i in experiments[exp]],
                   x, width, pos_definitions,
-                  1, 0.5, '30% CHL', show_label)
+                  1, 0.5, '30% ХС', show_label)
 
     else:
         raise ValueError('unknown exp value')
 
     x = np.arange(len(experiments[exp]))
-    ax.set_title(exp)
+    ax.set_title(to_rus[exp])
     ax.xaxis.set_ticks(x)
-    ax.set_xticklabels(experiments[exp])
+    ax.set_xticklabels([to_rus[i] for i in experiments[exp]])
 
 
 def calc_chl_fractions(path, systems_list, times, timedelta, dt):
@@ -351,12 +362,12 @@ def plot_mhp_kdeplots(path, experiments, exp, times, deltat, dt):
         data = collect_mhp_values_from_timepoints(
             path, syst, [times[-2]], deltat, dt)
         if ax == axs[0]:
-            single_kdeplot(ax, data, 'C0', '-', '0% CHL')
+            single_kdeplot(ax, data, 'C0', '-', '0% ХС')
         else:
             single_kdeplot(ax, data, 'C0', '-', None)
-        ax.set_title(syst)
+        ax.set_title(to_rus[syst])
         ax.set_ylim(0)
-        ax.set_xlabel('MHP, log P')
+        ax.set_xlabel('MГП, log P')
 
     if exp != 'head polarity':
         for syst, ax in zip(systs_chol10, axs):
@@ -364,7 +375,7 @@ def plot_mhp_kdeplots(path, experiments, exp, times, deltat, dt):
             data = collect_mhp_values_from_timepoints(
                 path, syst, [times[-2]], deltat, dt)
             if ax == axs[0]:
-                single_kdeplot(ax, data, 'C1', '-.', '10% CHL')
+                single_kdeplot(ax, data, 'C1', '-.', '10% ХС')
             else:
                 single_kdeplot(ax, data, 'C1', '-.', None)
 
@@ -373,7 +384,7 @@ def plot_mhp_kdeplots(path, experiments, exp, times, deltat, dt):
         data = collect_mhp_values_from_timepoints(
             path, syst, [times[-2]], deltat, dt)
         if ax == axs[0]:
-            single_kdeplot(ax, data, 'C2', '--', '30% CHL')
+            single_kdeplot(ax, data, 'C2', '--', '30% ХС')
         else:
             single_kdeplot(ax, data, 'C2', '--', None)
 
@@ -383,14 +394,14 @@ def plot_mhp_kdeplots(path, experiments, exp, times, deltat, dt):
             data = collect_mhp_values_from_timepoints(
                 path, syst, [times[-2]], deltat, dt)
             if ax == axs[0]:
-                single_kdeplot(ax, data, 'C3', ':', '50% CHL')
+                single_kdeplot(ax, data, 'C3', ':', '50% ХС')
             else:
                 single_kdeplot(ax, data, 'C3', ':', None)
 
-    axs[0].set_ylabel('Density')
-    fig.suptitle(exp)
+    axs[0].set_ylabel('Плотность вероятности')
+    fig.suptitle(to_rus[exp])
     fig.legend(bbox_to_anchor=(1.04, 1))
-    fname = '_'.join(exp.split()) + f'_mhp_hists_dt{dt}.png'
+    fname = '_'.join(exp.split()) + f'_mhp_hists_dt{dt}_rus.png'
     plt.savefig(path / 'notebooks' / 'mhpmaps' / 'imgs' /
                 fname, bbox_inches='tight', dpi=300)
 
@@ -810,12 +821,12 @@ def main():
             ax.set_xticks(ticks)
             ax.set_xticklabels(labels, rotation=45,
                                ha='right', rotation_mode='anchor')
-        axs[0].set_ylabel('% area')
+        axs[0].set_ylabel('% площади')
         fig.legend(bbox_to_anchor=(1.04, 1))
-        fig.suptitle(
-            'Surface area occupied by regions of varying degrees of hydrophobicity')
+        # fig.suptitle(
+        #     'Доля площади поверхности липидного бислояя, занимаемая участками различной полярности')
         plt.savefig(chol_impact / 'notebooks' / 'mhpmaps' / 'imgs' /
-                    f'mhp_hists_area_dt{dt}.png', bbox_inches='tight', dpi=300)
+                    f'mhp_hists_area_dt{dt}_rus.png', bbox_inches='tight', dpi=300)
         print('done.')
 
     if args.plot_chl_area_hists:
@@ -836,12 +847,13 @@ def main():
             ax.set_ylim(0)
             ax.set_xticklabels(labels, rotation=45,
                                ha='right', rotation_mode='anchor')
-        axs[0].set_ylabel('% area')
+        axs[0].set_ylabel('% площади')
         fig.legend(bbox_to_anchor=(1.04, 1))
-        fig.suptitle(
-            'Surface area composed of CHL atoms occupied by regions of varying degrees of hydrophobicity')
+        # fig.suptitle(
+        #     'Доля площади поверхности липидного бислоя, занимаемая участками различной полярности,'
+        #     ' состоящих из атомов ХС')
         plt.savefig(chol_impact / 'notebooks' / 'mhpmaps' / 'imgs' /
-                    f'mhp_hists_chl_area_dt{dt}.png', bbox_inches='tight', dpi=300)
+                    f'mhp_hists_chl_area_dt{dt}_rus.png', bbox_inches='tight', dpi=300)
         print('done.')
 
     if args.plot_mhp_hists:
