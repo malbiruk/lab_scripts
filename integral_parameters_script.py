@@ -950,99 +950,99 @@ def plot_angles_density(experiments: dict, trj_slices: list[TrajectorySlice], to
 # plt.ylabel('Плотность вероятности')
 # plt.xlabel('ɑ, °')
 # plt.savefig(trj.system.path / 'popc_chol30_comps.png', bbox_inches='tight')
-df = pd.read_csv(trj.system.path / 'notebooks' /
-                 'integral_parameters' / 'tilt_density.csv')
-y = '% of horizontal component'
-fig,axs = plt.subplots(1,3, figsize=(16,7))
-for s, ax in zip(['popc_chol10','popc_chol30','popc_chol50'], axs):
-    ax2 = ax.twinx()
-    sns.histplot(data=df[(df['system'] == s.split('_chol', 1)[0])
-                         & (df['CHL amount, %'] == int(s.split('_chol', 1)[1]))],
-                 x='z', y=y, ax=ax2, alpha=0.5, bins=50,
-                 stat='density')
-    try:
-        plot_density_profile(ax,
-                             TrajectorySlice(
-                                 System(
-                                     trj.system.path, s),
-                                 trj.b, trj.e, trj.dt),
-                             groups=['chols'], color='k', label='ХС')
-        plot_density_profile(ax,
-                             TrajectorySlice(
-                                 System(
-                                     trj.system.path, s),
-                                 trj.b, trj.e, trj.dt),
-                             groups=['phosphates'], color='C3', label='PO4')
-    except FileNotFoundError as e:
-        print(e)
-
-    if ax != axs[-1]:
-        ax2.set_ylabel('')
-        ax2.yaxis.set_ticklabels([])
-    else:
-        ax2.set_ylabel('% горизонтальной компоненты')
-    if ax != axs[0]:
-        ax.set_ylabel('')
-        ax.yaxis.set_ticklabels([])
-    else:
-        ax.set_ylabel('Плотность, кг/м³')
-    ax.set_xlabel('')
-    ax.set_title(
-        f"{to_rus[s.split('_chol', 1)[0]]}, {s.split('_chol', 1)[1]} % ХС")
-for ax in axs:
-    ax.set_xlabel('Z, нм')
-labels, handles = axs[0].get_legend_handles_labels()
-fig.legend(labels, handles)
-plt.savefig(trj.system.path /
-        'popc_density_angles.png',
-        bbox_inches='tight')
-
-
-for exp, systs in experiments.items():
-    fig, axs = plt.subplots(3, 3, figsize=(
-        21, 21), sharex=True, sharey=True)
-    systs = [(s + '_chol10', s + '_chol30', s + '_chol50')
-             for s in systs]
-    for s_row, ax_row in zip(systs, axs):
-        for s, ax in zip(s_row, ax_row):
-            ax2 = ax.twinx()
-            sns.histplot(data=df[(df['system'] == s.split('_chol', 1)[0])
-                                 & (df['CHL amount, %'] == int(s.split('_chol', 1)[1]))],
-                         x='z', y=y, ax=ax2, alpha=0.5, bins=50,
-                         stat='density')
-            try:
-                plot_density_profile(ax,
-                                     TrajectorySlice(
-                                         System(
-                                             trj_slices[0].system.path, s),
-                                         trj_slices[0].b, trj_slices[0].e, trj_slices[0].dt),
-                                     groups=['chols'], color='k')
-                plot_density_profile(ax,
-                                     TrajectorySlice(
-                                         System(
-                                             trj_slices[0].system.path, s),
-                                         trj_slices[0].b, trj_slices[0].e, trj_slices[0].dt),
-                                     groups=['phosphates'], color='C3')
-            except FileNotFoundError as e:
-                print(e)
-
-            if ax != ax_row[-1]:
-                ax2.set_ylabel('')
-                ax2.yaxis.set_ticklabels([])
-            if ax != ax_row[0]:
-                ax.set_ylabel('')
-            ax.set_xlabel('')
-            ax.set_title(
-                f"{s.split('_chol', 1)[0]}, {s.split('_chol', 1)[1]} % CHL")
-    for ax in axs[-1, :]:
-        ax.set_xlabel('Z, nm')
-    labels, handles = axs[0, 0].get_legend_handles_labels()
-    fig.legend(labels, handles)
-    fig.suptitle(exp)
-    plt.savefig(trj_slices[0].system.path / 'notebooks' / 'integral_parameters' /
-                f'{"_".join(exp.split())}_'
-                f'density_{out}_{trj_slices[0].b}_{trj_slices[0].e}_{trj_slices[0].dt}.png',
-                bbox_inches='tight')
+# df = pd.read_csv(trj.system.path / 'notebooks' /
+#                  'integral_parameters' / 'tilt_density.csv')
+# y = '% of horizontal component'
+# fig,axs = plt.subplots(1,3, figsize=(16,7))
+# for s, ax in zip(['popc_chol10','popc_chol30','popc_chol50'], axs):
+#     ax2 = ax.twinx()
+#     sns.histplot(data=df[(df['system'] == s.split('_chol', 1)[0])
+#                          & (df['CHL amount, %'] == int(s.split('_chol', 1)[1]))],
+#                  x='z', y=y, ax=ax2, alpha=0.5, bins=50,
+#                  stat='density')
+#     try:
+#         plot_density_profile(ax,
+#                              TrajectorySlice(
+#                                  System(
+#                                      trj.system.path, s),
+#                                  trj.b, trj.e, trj.dt),
+#                              groups=['chols'], color='k', label='ХС')
+#         plot_density_profile(ax,
+#                              TrajectorySlice(
+#                                  System(
+#                                      trj.system.path, s),
+#                                  trj.b, trj.e, trj.dt),
+#                              groups=['phosphates'], color='C3', label='PO4')
+#     except FileNotFoundError as e:
+#         print(e)
+#
+#     if ax != axs[-1]:
+#         ax2.set_ylabel('')
+#         ax2.yaxis.set_ticklabels([])
+#     else:
+#         ax2.set_ylabel('% горизонтальной компоненты')
+#     if ax != axs[0]:
+#         ax.set_ylabel('')
+#         ax.yaxis.set_ticklabels([])
+#     else:
+#         ax.set_ylabel('Плотность, кг/м³')
+#     ax.set_xlabel('')
+#     ax.set_title(
+#         f"{to_rus[s.split('_chol', 1)[0]]}, {s.split('_chol', 1)[1]} % ХС")
+# for ax in axs:
+#     ax.set_xlabel('Z, нм')
+# labels, handles = axs[0].get_legend_handles_labels()
+# fig.legend(labels, handles)
+# plt.savefig(trj.system.path /
+#         'popc_density_angles.png',
+#         bbox_inches='tight')
+#
+#
+# for exp, systs in experiments.items():
+#     fig, axs = plt.subplots(3, 3, figsize=(
+#         21, 21), sharex=True, sharey=True)
+#     systs = [(s + '_chol10', s + '_chol30', s + '_chol50')
+#              for s in systs]
+#     for s_row, ax_row in zip(systs, axs):
+#         for s, ax in zip(s_row, ax_row):
+#             ax2 = ax.twinx()
+#             sns.histplot(data=df[(df['system'] == s.split('_chol', 1)[0])
+#                                  & (df['CHL amount, %'] == int(s.split('_chol', 1)[1]))],
+#                          x='z', y=y, ax=ax2, alpha=0.5, bins=50,
+#                          stat='density')
+#             try:
+#                 plot_density_profile(ax,
+#                                      TrajectorySlice(
+#                                          System(
+#                                              trj_slices[0].system.path, s),
+#                                          trj_slices[0].b, trj_slices[0].e, trj_slices[0].dt),
+#                                      groups=['chols'], color='k')
+#                 plot_density_profile(ax,
+#                                      TrajectorySlice(
+#                                          System(
+#                                              trj_slices[0].system.path, s),
+#                                          trj_slices[0].b, trj_slices[0].e, trj_slices[0].dt),
+#                                      groups=['phosphates'], color='C3')
+#             except FileNotFoundError as e:
+#                 print(e)
+#
+#             if ax != ax_row[-1]:
+#                 ax2.set_ylabel('')
+#                 ax2.yaxis.set_ticklabels([])
+#             if ax != ax_row[0]:
+#                 ax.set_ylabel('')
+#             ax.set_xlabel('')
+#             ax.set_title(
+#                 f"{s.split('_chol', 1)[0]}, {s.split('_chol', 1)[1]} % CHL")
+#     for ax in axs[-1, :]:
+#         ax.set_xlabel('Z, nm')
+#     labels, handles = axs[0, 0].get_legend_handles_labels()
+#     fig.legend(labels, handles)
+#     fig.suptitle(exp)
+#     plt.savefig(trj_slices[0].system.path / 'notebooks' / 'integral_parameters' /
+#                 f'{"_".join(exp.split())}_'
+#                 f'density_{out}_{trj_slices[0].b}_{trj_slices[0].e}_{trj_slices[0].dt}.png',
+#                 bbox_inches='tight')
 
 
 # %%
