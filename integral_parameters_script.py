@@ -30,6 +30,7 @@ from modules.density import (
     get_densities, plot_density_profile, calculate_distances_between_density_groups,
     calculate_density_peak_widths
 )
+from modules.constants import PATH, TO_RUS, EXPERIMENTS
 
 
 def get_chl_tilt(trj: TrajectorySlice) -> None:
@@ -302,9 +303,11 @@ def lists_of_values_to_df(func: Callable, trj_slices: list[TrajectorySlice]) -> 
     return df.explode('data')
 
 
-def density(trj_slices: list[TrajectorySlice]) -> None:
+def density(trj_slices: list[TrajectorySlice], experiments=None, to_rus=None) -> None:
     '''
     apply get_densities function to list of trajectories
+    experiments and to_rus arguments are not used,
+    but essential for activating from dict as implemented in main()
     '''
     print('obtain all densities...')
     with ProcessPoolExecutor(max_workers=8) as executor:
@@ -329,23 +332,23 @@ def calculate_relative_changes(df: pd.DataFrame) -> pd.DataFrame:
         calculates difference between n and n+1 row in Series in percents
         '''
         def rel_m(val1, val2):
-            return((val2 - val1) / val1 * 100)
+            return (val2 - val1) / val1 * 100
         vals = [rel_m(x[n], x[n + 1]) for n in range(x.shape[0] - 1)]
         ret = list([np.nan])  # pad return vector however you need to
         ret = ret + vals
-        return(ret)
+        return ret
 
     def diff_std(x: pd.Series, y: pd.Series) -> np.ndarray:
         '''
         calculates std between n and n+1 row in Series in percents
         '''
         def rel_s(s1, s2, m1, m2):
-            return(np.sqrt(np.abs((s2**2 * m1**2 - s1**2 * m2**2) / m1**4)) * 100)
+            return np.sqrt(np.abs((s2**2 * m1**2 - s1**2 * m2**2) / m1**4)) * 100
         vals = [rel_s(x[n], x[n + 1], y[n], y[n + 1])
                 for n in range(x.shape[0] - 1)]
         ret = list([np.nan])  # pad return vector however you need to
         ret = ret + vals
-        return(ret)
+        return ret
 
     df_relative['relative mean, %'] = df_relative.loc[:,
                                                       ['mean']].apply(diff_mean)
@@ -382,7 +385,8 @@ def plot_violins(csv: PosixPath, y: str, experiments: dict, to_rus: dict) -> Non
             df_relative['experiment'] = df_relative['experiment'].apply(
                 lambda x: to_rus[x])
             df_relative.rename(columns={'system': 'Система',
-                                        'relative mean, %': 'Относительное изменение, %'}, inplace=True)
+                                        'relative mean, %': 'Относительное изменение, %'},
+                               inplace=True)
 
         x = 'Система' if rus else 'system'
         y = to_rus[y] if rus else y
@@ -524,7 +528,7 @@ def chl_tilt_angle(trj_slices: list[TrajectorySlice], experiments: dict, to_rus:
     '''
     apply get_chl_tilt function to list of trajectories,
     split each system into components (plot + save parameters),
-    unite data of several systems into one file
+    unite data of all systems into one file
     and plot results as violinplot
     '''
     trj_slices = [s for s in trj_slices if 'chol' in s.system.name]
@@ -535,8 +539,10 @@ def chl_tilt_angle(trj_slices: list[TrajectorySlice], experiments: dict, to_rus:
     print('saving chl tilt angles...')
     df = chl_tilt_summary(trj_slices)
     df.to_csv(
-        path / 'notebooks' / 'integral_parameters' / f'chl_tilt_{b}-{e}-{dt}.csv', index=False)
-    df['α, °'] = df['α, °'].apply(lambda x: np.abs(x))
+        path / 'notebooks' / 'integral_parameters' /
+        f'chl_tilt_{b}-{e}-{dt}.csv',
+        index=False)
+    df['α, °'] = df['α, °'].abs()
     df.to_csv(
         path / 'notebooks' / 'integral_parameters' / 'chl_tilt_to_plot.csv', index=False)
     print('plotting chol tilts and splitting into components...')
@@ -770,9 +776,9 @@ def parse_args():
                         help='possible values:\n'
                         '"dp" -- density profiles (for each system + CHL/phosphates comparison),\n'
                         '"scd_atoms" -- scd per atom for systems.')
-    parser.add_argument('--rus',
+    parser.add_argument('--all',
                         action='store_true',
-                        help='plot graphs with russian captions.')
+                        help='start all "calculate" and "plot" tasks.')
     parser.add_argument('-b', '--b', type=int, default=150,
                         help='beginning time in ns')
     parser.add_argument('-e', '--e', type=int, default=200,
@@ -795,41 +801,17 @@ def main():
     '''
     sns.set(style='ticks', context='talk', palette='bright')
     args = parse_args()
-    path = Path('/home/klim/Documents/chol_impact')
-    experiments = {
-        'chain length': ('dmpc', 'dppc_325', 'dspc'),
-        'chain saturation': ('dppc_325', 'popc', 'dopc'),
-        'head polarity': ('dopc', 'dopc_dops50', 'dops'),
-    }
-
-    to_rus = {'dmpc': 'ДМФХ', 'dppc_325': 'ДПФХ', 'dspc': 'ДСФХ', 'popc': 'ПОФХ',
-              'dopc': 'ДОФХ', 'dops': 'ДОФС', 'dopc_dops50': 'ДОФХ/ДОФС',
-              'chain length': 'Длина ацильных цепей',
-              'chain saturation': 'Насыщенность ацильных цепей',
-              'head polarity': 'Полярность "головок"',
-              'thickness, nm': 'Толщина, нм',
-              'distance, nm': 'Расстояние, нм',
-              'area per lipid, nm²': 'Средняяя площадь на липид, нм²',
-              'scd': 'Scd', 'peak width, nm': 'Ширина пиков профилей плотности ХС, нм',
-              'α, °': 'α, °'
-              }
+    path = PATH
+    experiments = EXPERIMENTS
+    to_rus = TO_RUS
 
     systems = flatten([(i, i + '_chol10', i + '_chol30', i + '_chol50')
                        for i in flatten(experiments.values())])
-    systems.remove('dopc_dops50_chol50')
-    systems.remove('dopc_dops50')
 
     # trj_slices = [TrajectorySlice(
     #     System(path, s), 150, 200, 1000) for s in systems]
     trj_slices = [TrajectorySlice(
         System(path, s), args.b, args.e, args.dt) for s in systems]
-    # FIXME: delete after dopc_dops50 will be calculated
-    trj_slices.append(TrajectorySlice(
-        System(path, 'dopc_dops50'), 4, 54, 1000))
-    trj_slices.remove(TrajectorySlice(
-        System(path, 'dspc_chol10'), args.b, args.e, args.dt))
-    trj_slices.remove(TrajectorySlice(
-        System(path, 'dspc_chol50'), args.b, args.e, args.dt))
 
     to_calc = {'density': density,
                'thickness': thickness,
@@ -850,6 +832,12 @@ def main():
         for arg in args.plot:
             to_plot.get(arg, lambda: 'Invalid')(
                 experiments, trj_slices, to_rus)
+
+    if args.all:
+        for i in to_calc:
+            to_calc[i](trj_slices, experiments, to_rus)
+        for i in to_plot:
+            to_plot[i](experiments, trj_slices, to_rus)
 
 
 if __name__ == '__main__':
