@@ -524,7 +524,8 @@ def chl_tilt_summary(trj_slices: list[TrajectorySlice]) -> None:
     return df.explode(['timepoint', 'chl_index', 'α, °'])
 
 
-def chl_tilt_angle(trj_slices: list[TrajectorySlice], experiments: dict, to_rus: dict) -> None:
+def chl_tilt_angle(trj_slices: list[TrajectorySlice], experiments: dict = EXPERIMENTS, to_rus: dict = TO_RUS,
+                   no_comps=False) -> None:
     '''
     apply get_chl_tilt function to list of trajectories,
     split each system into components (plot + save parameters),
@@ -542,23 +543,24 @@ def chl_tilt_angle(trj_slices: list[TrajectorySlice], experiments: dict, to_rus:
         path / 'notebooks' / 'integral_parameters' /
         f'chl_tilt_{b}-{e}-{dt}.csv',
         index=False)
-    df['α, °'] = df['α, °'].abs()
-    df.to_csv(
-        path / 'notebooks' / 'integral_parameters' / 'chl_tilt_to_plot.csv', index=False)
-    print('plotting chol tilts and splitting into components...')
-    for trj in trj_slices:
-        if not Path(f'{trj.system.path}/notebooks/chol_tilt/'
-                    f'{trj.system.name}_{trj.b}-{trj.e}-{trj.dt}_4_comps.csv').is_file():
-            fig, ax = plt.subplots(figsize=(7, 7))
-            break_tilt_into_components(ax, trj)
-            ax.set_xlabel('Tilt (degree)')
-            ax.set_ylabel('Density')
-            fig.patch.set_facecolor('white')
-            plt.savefig(f'{path}/notebooks/chol_tilt/'
-                        f'{trj.system}_{trj.b}-{trj.e}-{trj.dt}_4_comps.png',
-                        bbox_inches='tight', facecolor=fig.get_facecolor())
-            plt.close()
-    print('plotting results...')
+    if not no_comps:
+        df['α, °'] = df['α, °'].abs()
+        df.to_csv(
+            path / 'notebooks' / 'integral_parameters' / 'chl_tilt_to_plot.csv', index=False)
+        print('plotting chol tilts and splitting into components...')
+        for trj in trj_slices:
+            if not Path(f'{trj.system.path}/notebooks/chol_tilt/'
+                        f'{trj.system.name}_{trj.b}-{trj.e}-{trj.dt}_4_comps.csv').is_file():
+                fig, ax = plt.subplots(figsize=(7, 7))
+                break_tilt_into_components(ax, trj)
+                ax.set_xlabel('Tilt (degree)')
+                ax.set_ylabel('Density')
+                fig.patch.set_facecolor('white')
+                plt.savefig(f'{path}/notebooks/chol_tilt/'
+                            f'{trj.system}_{trj.b}-{trj.e}-{trj.dt}_4_comps.png',
+                            bbox_inches='tight', facecolor=fig.get_facecolor())
+                plt.close()
+        print('plotting results...')
 
     plot_violins(path / 'notebooks' / 'integral_parameters' / 'chl_tilt_to_plot.csv',
                  'α, °', experiments, to_rus)

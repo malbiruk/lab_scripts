@@ -3,7 +3,7 @@ this module includes classes which make it easier to operate with trajectories
 '''
 
 from dataclasses import dataclass, field
-from pathlib import PosixPath
+from pathlib import Path, PosixPath
 import os
 
 
@@ -68,3 +68,22 @@ class TrajectorySlice:
     def __repr__(self):
         return f'TrajectorySlice({self.system.name}, ' \
             f'b={self.b}, e={self.e}, dt={self.dt})'
+
+    def generate_slice_with_gmx(self):
+        '''
+        create a slice of trajectory in xtc format in the system folder using
+        gmx trjconv
+        '''
+        if (Path(self.system.dir) / 'md' /
+                f'pbcmol_{self.b}-{self.e}-{self.dt}.xtc').is_file():
+            print(str(Path(self.system.dir) / 'md' /
+                      f'pbcmol_{self.b}-{self.e}-{self.dt}.xtc') +
+                  ' already exists')
+        else:
+            cmd = ['source `ls -t /usr/local/gromacs*/bin/GMXRC | head -n 1 ` && ',
+                   f'echo 0 | gmx trjconv -s {self.system.dir}/md/md.tpr',
+                   f'-f {self.system.dir}/md/pbcmol.xtc',
+                   f'-b {self.b*1000} -e {self.e * 1000} -dt {self.dt}',
+                   f'-o {self.system.dir}/md/pbcmol_{self.b}-{self.e}-{self.dt}.xtc']
+            os.popen(' '.join(cmd)).read()
+            print('done ✅\n')

@@ -1,8 +1,17 @@
-'''
-Script to obtain chl angle components and draw CHL angle component+density plots.
-CHL ids and angle component are connected here.
-'''
 
+
+# %% md
+# This notebook is for testing and troubleshooting code
+#
+# # cholesterol_angle_components_density.py
+
+
+# %% md
+# ### Imports and define functions
+
+# %%
+
+import MDAnalysis as mda
 import argparse
 import sys
 from pathlib import Path
@@ -239,140 +248,65 @@ def plot_angles_density(experiments: dict, trj_slices: list[TrajectorySlice],
     print('done.')
 
 
-def components_z_2d_ks_statistics(trj_slices: list[TrajectorySlice],
-                                  n_points: int = 50, max_n: int = 5000):
+# %% md
+# ## Creating angle_components_3d function
+#
+# 1. It should add x, y, z coordinates to COMs and O atoms of CHL
+# for each CHL molecule in each timestep specified by user input
+# (add data to subset of larger chl_tilt_with_comps table)
+# > 1. use gmx trjconv to obtain slices of trajectory
+# > 2. run MDAnalysis on it to obtain coords of COMs and O atoms
+#
+# 1. Create 3D plot from this data (average 100 frames 199-200 ns, dt=100 ps)
+# > **averaging:**
+# > - just get mean of coords for each molecule;
+# > - for components: get sum of components for each molecule
+# (i.e. in how many frames there is 1 in both columns '1' and '2', than divide n of frames
+# with 1 in '1' by this sum -- it will be ratio of '1' componen than apply colormap;
+# before this procedure rows with 1 in column 'nan' should be deleted)
+
+
+# %%
+systems = flatten([(i, i + '_chol10', i + '_chol30', i + '_chol50')
+                   for i in flatten(EXPERIMENTS.values())])
+
+trj_slices = [TrajectorySlice(
+    System(PATH, s), 199, 200, 10) for s in systems]
+
+chl_tilt_b, chl_tilt_e, chl_tilt_dt = 100, 200, 100
+
+# %%
+
+
+def angle_components_3d(trj_slices, comp_b, comp_e, comp_dt):
     trj_slices = [s for s in trj_slices if 'chol' in s.system.name]
-    # split list in chunks of three
-    trj_slices_chunked = [trj_slices[i:i + 3]
-                          for i in range(0, len(trj_slices), 3)]
-    df = pd.read_csv(PATH / 'notebooks' /
-                     'integral_parameters' /
-                     f'tilt_density_{trj_slices[0].b}-{trj_slices[0].e}-{trj_slices[0].dt}.csv')
 
-    for i in trj_slices_chunked:
-        fig, axs = plt.subplots(3, 1, figsize=(10, 16))
-        for ax, j in zip(axs, i):
-            s = str(j.system)
-            print(s)
-            data = df[(df['system'] == s.split('_chol', 1)[0])
-                      & (df['CHL amount, %'] == int(s.split('_chol', 1)[1]))]
-
-            p_values_test = []
-            d_values_test = []
-            p_values_rand = []
-            d_values_rand = []
-
-            sample_sizes = np.linspace(10, max_n, n_points, dtype=int)
-
-            for sample_size, _ in zip(sample_sizes, range(1, n_points + 1)):
-
-                data_sampled = data.sample(
-                    n=sample_size).dropna().reset_index(drop=True)
-                p_val, d_val = ndtest.ks2d2s(data_sampled['z'],
-                                             data_sampled['% of horizontal component'],
-                                             data_sampled['z'],
-                                             data_sampled['% of vertical component'], extra=True)
-                d_values_test.append(d_val)
-                p_values_test.append(p_val)
-
-                distr1 = np.random.normal(size=[sample_size, 2])
-                distr2 = np.random.normal(size=[sample_size, 2])
-                p_val, d_val = ndtest.ks2d2s(distr1[:, 0],
-                                             distr1[:, 1],
-                                             distr2[:, 0],
-                                             distr2[:, 1], extra=True)
-                d_values_rand.append(d_val)
-                p_values_rand.append(p_val)
-            print(f'done, plotting...')
-
-            ax2 = ax.twinx()
-            ax.plot(sample_sizes, p_values_rand, c='k', marker='s', ms=3, linestyle='-',
-                    label='randomly generated 2D normal distributions (p-value)')
-            ax2.plot(sample_sizes, d_values_rand, c='k', marker='o', ms=2, linestyle=':',
-                     label='randomly generated 2D normal distributions (KS statistic)')
-            ax.plot(sample_sizes, p_values_test, c='r', marker='s', ms=3,
-                    label='Z - % of horizontal vs vertical component (p-value)')
-            ax2.plot(sample_sizes, d_values_test, c='r', marker='o', ms=2, linestyle=':',
-                     label='Z - % of horizontal vs vertical component (KS statistic)')
-            ax.plot(sample_sizes, [0.01 for _ in sample_sizes],
-                    c='grey', linestyle='--')
-            # plt.yscale('log')
-            ax.set_title(s)
-            ax.set_ylabel('p-value')
-            ax2.set_ylabel('KS statistic')
-            ax.set_xlabel(f'n of samples (total: {len(data)})')
-            if ax == axs[0]:
-                ax.legend(loc='upper right')
-            ax.text(max_n * 0.9, 0.05, 'p=0.01')
-
-        outname = str(i[0].system).split('_', 1)[0]
-        plt.savefig(PATH / 'notebooks' / 'chol_tilt' / 'components_z_ks_statistics' /
-                    f'components_z_2d_ks_statistics_{outname}_{trj_slices[0].b}-{trj_slices[0].e}-{trj_slices[0].dt}.png',
-                    bbox_inches='tight')
+    if not (PATH / 'notebooks' / 'integral_parameters' /
+            f'chl_tilt_comps_coords_{trj_slices.b}-{trj_slices.e}-{trj_slices.dt}.csv'
+            ).is_file():
+        add_coords_to_table_with_comps(trj_slices, comp_b, comp_e, comp_dt)
+    else:
+        df = pd.read_csv(PATH / 'notebooks' / 'integral_parameters' /
+                         f'chl_tilt_comps_coords_{trj_slices.b}-{trj_slices.e}-{trj_slices.dt}.csv')
 
 
-@ sparkles
-@ duration
-def main():
-    '''
-    parse arguments and execute all or some of the functions:
-    chl_tilt_angle, angle_components_density, angle_components_3d
-    '''
-    parser = argparse.ArgumentParser(
-        description='Script to obtain chl angle components and draw CHL angle '
-        'component+density plots')
-    parser.add_argument('--chl_tilt_angle',
-                        action='store_true',
-                        help='calculate angles between CHL c3-c17 vector and bilayer plane '
-                        'in each frame of trajectory for each CHL molecule, '
-                        'split to components')
-    parser.add_argument('--angle_components_density',
-                        action='store_true',
-                        help='plot percentage of component related to Z axis '
-                        'in combination with density plot')
-    parser.add_argument('--angle_components_3d',
-                        action='store_true',
-                        help='draw 3d plots of distribution of components')
-    parser.add_argument('-b', '--b', type=int, default=150,
-                        help='beginning time in ns, default=150')
-    parser.add_argument('-e', '--e', type=int, default=200,
-                        help='ending time in ns, default=200')
-    parser.add_argument('-dt', '--dt', type=int, default=1000,
-                        help='dt in ps (default=1000)')
-    parser.add_argument('--chl_tilt_b_e_dt',
-                        nargs='+',
-                        default='100 200 100',
-                        help='b e dt (3 numbers) for calculation of tilt components, '
-                        'chl_tilt_angle will be calculated with this values. '
-                        '(100 200 100 by default)')
+# %%
 
-    if len(sys.argv) < 2:
-        parser.print_usage()
-
-    args = parser.parse_args()
-
-    systems = flatten([(i, i + '_chol10', i + '_chol30', i + '_chol50')
-                       for i in flatten(EXPERIMENTS.values())])
-
-    trj_slices = [TrajectorySlice(
-        System(PATH, s), args.b, args.e, args.dt) for s in systems]
-
-    chl_tilt_b, chl_tilt_e, chl_tilt_dt = [
-        int(i) for i in args.chl_tilt_b_e_dt.split()]
-
-    if args.chl_tilt_angle:
-        chl_tilt_trj_slices = [TrajectorySlice(
-            System(PATH, s), chl_tilt_b, chl_tilt_e, chl_tilt_dt) for s in systems]
-
-        chl_tilt_angle(chl_tilt_trj_slices, EXPERIMENTS, TO_RUS)
+trj_slices = [s for s in trj_slices if 'chol' in s.system.name]
+if not (PATH / 'notebooks' / 'integral_parameters' /
+        f'chl_tilt_{trj_slices[0].b}-{trj_slices[0].e}-{trj_slices[0].dt}_with_comps.csv').is_file():
+        chl_tilt_angle(trj_slices, no_comps=True)
         add_comps_to_chl_tilt(chl_tilt_b, chl_tilt_e, chl_tilt_dt)
 
-    if args.angle_components_density:
-        plot_angles_density(EXPERIMENTS, trj_slices,
-                            chl_tilt_b, chl_tilt_e, chl_tilt_dt)
-        sns.set_context('paper')
-        components_z_2d_ks_statistics(trj_slices)
+# %%
+trj = trj_slices[0]
+trj.generate_slice_with_gmx()
+u = mda.Universe(f'{trj.system.dir}/md/md.tpr',
+                 f'{trj.system.dir}/md/pbcmol_{trj.b}-{trj.e}-{trj.dt}.xtc')
+
+# def obtain_slice_of trajectory()
 
 
-if __name__ == '__main__':
-    main()
+# %%
+df = pd.read_csv(PATH / 'notebooks' / 'integral_parameters' /
+        f'chl_tilt_{trj_slices[0].b}-{trj_slices[0].e}-{trj_slices[0].dt}_with_comps.csv')
