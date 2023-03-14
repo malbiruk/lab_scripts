@@ -246,35 +246,6 @@ def plot_angles_density(experiments: dict, trj_slices: list[TrajectorySlice],
                             '% of vertical component')
     print('done.')
 
-
-# %% md
-# ## Creating angle_components_3d function
-#
-# 1. It should add x, y, z coordinates to COMs and O atoms of CHL
-# for each CHL molecule in each timestep specified by user input
-# (add data to subset of larger chl_tilt_with_comps table)
-# 1. Create 3D plot from this data (average 100 frames 199-200 ns, dt=100 ps)
-# > **averaging:**
-# > - just get mean of coords for each molecule;
-# > - for components: get sum of components for each molecule
-# (i.e. in how many frames there is 1 in both columns '1' and '2', than divide n of frames
-# with 1 in '1' by this sum -- it will be ratio of '1' componen than apply colormap;
-# before this procedure rows with 1 in column 'nan' should be deleted)
-
-# %%
-
-def angle_components_3d(trj_slices, comp_b, comp_e, comp_dt):
-    trj_slices = [s for s in trj_slices if 'chol' in s.system.name]
-
-    if not (PATH / 'notebooks' / 'integral_parameters' /
-            f'chl_tilt_comps_coords_{trj_slices.b}-{trj_slices.e}-{trj_slices.dt}.csv'
-            ).is_file():
-        add_coords_to_table_with_comps(trj_slices, comp_b, comp_e, comp_dt)
-    else:
-        df = pd.read_csv(PATH / 'notebooks' / 'integral_parameters' /
-                         f'chl_tilt_comps_coords_{trj_slices.b}-{trj_slices.e}-{trj_slices.dt}.csv')
-
-
 # %% md
 # ## 2D Kolmogorov-Smirnov test of Z-% of horizontal component vs Z-% of vertical component
 # Creating plots of p-value depending on number of samples and comparing with KS test of
@@ -282,94 +253,130 @@ def angle_components_3d(trj_slices, comp_b, comp_e, comp_dt):
 
 # %%
 
+
 systems = flatten([(i, i + '_chol10', i + '_chol30', i + '_chol50')
                    for i in flatten(EXPERIMENTS.values())])
+
+
+systems = list(dict.fromkeys([s for s in systems if 'dopc' in s]))[:4]
+systems
+# %%
 
 trj_slices = [TrajectorySlice(
     System(PATH, s), 150, 200, 1000) for s in systems]
 
-df = pd.read_csv(trj_slices[0].system.path / 'notebooks' /
-                 'integral_parameters' /
-                 f'tilt_density_{trj_slices[0].b}-{trj_slices[0].e}-{trj_slices[0].dt}.csv')
+# %%
+
+
+def components_z_2d_ks_statistics(trj_slices: list[TrajectorySlice],
+                                  n_points: int = 50, max_n: int = 5000):
+    trj_slices = [s for s in trj_slices if 'chol' in s.system.name]
+    # split list in chunks of three
+    trj_slices_chunked = [trj_slices[i:i + 3]
+                          for i in range(0, len(trj_slices), 3)]
+    df = pd.read_csv(PATH / 'notebooks' /
+                     'integral_parameters' /
+                     f'tilt_density_{trj_slices[0].b}-{trj_slices[0].e}-{trj_slices[0].dt}.csv')
+
+    for i in trj_slices_chunked:
+        fig, axs = plt.subplots(3, 1, figsize=(10, 16))
+        for ax, j in zip(axs, i):
+            s = str(j.system)
+            print(s)
+            data = df[(df['system'] == s.split('_chol', 1)[0])
+                      & (df['CHL amount, %'] == int(s.split('_chol', 1)[1]))]
+
+            p_values_test = []
+            d_values_test = []
+            p_values_rand = []
+            d_values_rand = []
+
+            sample_sizes = np.linspace(10, max_n, n_points, dtype=int)
+
+            for sample_size, _ in zip(sample_sizes, range(1, n_points + 1)):
+
+                data_sampled = data.sample(
+                    n=sample_size).dropna().reset_index(drop=True)
+                p_val, d_val = ndtest.ks2d2s(data_sampled['z'],
+                                             data_sampled['% of horizontal component'],
+                                             data_sampled['z'],
+                                             data_sampled['% of vertical component'], extra=True)
+                d_values_test.append(d_val)
+                p_values_test.append(p_val)
+
+                distr1 = np.random.normal(size=[sample_size, 2])
+                distr2 = np.random.normal(size=[sample_size, 2])
+                p_val, d_val = ndtest.ks2d2s(distr1[:, 0],
+                                             distr1[:, 1],
+                                             distr2[:, 0],
+                                             distr2[:, 1], extra=True)
+                d_values_rand.append(d_val)
+                p_values_rand.append(p_val)
+            print(f'done, plotting...')
+
+            ax2 = ax.twinx()
+            l1 = ax.plot(sample_sizes, p_values_rand, c='k', marker='s', ms=3, linestyle='-',
+                         label='randomly generated 2D normal distributions (p-value)')
+            l2 = ax2.plot(sample_sizes, d_values_rand, c='k', marker='o', ms=2, linestyle=':',
+                          label='randomly generated 2D normal distributions (KS statistic)')
+            l3 = ax.plot(sample_sizes, p_values_test, c='r', marker='s', ms=3,
+                         label='Z - % of horizontal vs vertical component (p-value)')
+            l4 = ax2.plot(sample_sizes, d_values_test, c='r', marker='o', ms=2, linestyle=':',
+                          label='Z - % of horizontal vs vertical component (KS statistic)')
+            ax.plot(sample_sizes, [0.01 for _ in sample_sizes],
+                    c='grey', linestyle='--')
+            # plt.yscale('log')
+            ax.set_title(s)
+            ax.set_ylabel('p-value')
+            ax2.set_ylabel('KS statistic')
+            ax.set_xlabel(f'n of samples (total: {len(data)})')
+            if ax == axs[0]:
+                lns = l1 + l2 + l3 + l4
+                labs = [l.get_label() for l in lns]
+                ax.legend(lns, labs, loc='upper right')
+            ax.text(max_n * 0.9, 0.05, 'p=0.01')
+
+        outname = str(i[0].system).rsplit('_', 1)[0]
+        plt.savefig(PATH / 'notebooks' / 'chol_tilt' / 'components_z_ks_statistics' /
+                    f'components_z_2d_ks_statistics_{outname}_{trj_slices[0].b}-{trj_slices[0].e}-{trj_slices[0].dt}.png',
+                    bbox_inches='tight')
 
 
 # %%
-n_points = 50
-max_n = 5000
-
-
-trj_slices = [s for s in trj_slices if 'chol' in s.system.name]
-# split list in chunks of three
-trj_slices_chunked = [trj_slices[i:i + 3]
-                      for i in range(0, len(trj_slices), 3)]
-sns.set_context('paper')
-df = pd.read_csv(PATH / 'notebooks' /
-                 'integral_parameters' /
-                 f'tilt_density_{trj_slices[0].b}-{trj_slices[0].e}-{trj_slices[0].dt}.csv')
-
-for i in trj_slices_chunked:
-    fig, axs = plt.subplots(3, 1, figsize=(10, 16))
-    for ax, j in zip(axs, i):
-        s = str(j.system)
-        print(s)
-        data = df[(df['system'] == s.split('_chol', 1)[0])
-                  & (df['CHL amount, %'] == int(s.split('_chol', 1)[1]))]
-
-        p_values_test = []
-        d_values_test = []
-        p_values_rand = []
-        d_values_rand = []
-
-        sample_sizes = np.linspace(10, max_n, n_points, dtype=int)
-
-        for sample_size, _ in zip(sample_sizes, range(1, n_points + 1)):
-
-            data_sampled = data.sample(
-                n=sample_size).dropna().reset_index(drop=True)
-            p_val, d_val = ndtest.ks2d2s(data_sampled['z'],
-                                         data_sampled['% of horizontal component'],
-                                         data_sampled['z'],
-                                         data_sampled['% of vertical component'], extra=True)
-            d_values_test.append(d_val)
-            p_values_test.append(p_val)
-
-            distr1 = np.random.normal(size=[sample_size, 2])
-            distr2 = np.random.normal(size=[sample_size, 2])
-            p_val, d_val = ndtest.ks2d2s(distr1[:, 0],
-                                         distr1[:, 1],
-                                         distr2[:, 0],
-                                         distr2[:, 1], extra=True)
-            d_values_rand.append(d_val)
-            p_values_rand.append(p_val)
-        print(f'done, plotting...')
-
-        ax2 = ax.twinx()
-        ax.plot(sample_sizes, p_values_rand, c='k', marker='s', ms=3, linestyle='-',
-                label='randomly generated 2D normal distributions (p-value)')
-        ax2.plot(sample_sizes, d_values_rand, c='k', marker='o', ms=2, linestyle=':',
-                 label='randomly generated 2D normal distributions (KS statistic)')
-        ax.plot(sample_sizes, p_values_test, c='r', marker='s', ms=3,
-                label='Z - % of horizontal vs vertical component (p-value)')
-        ax2.plot(sample_sizes, d_values_test, c='r', marker='o', ms=2, linestyle=':',
-                 label='Z - % of horizontal vs vertical component (KS statistic)')
-        ax.plot(sample_sizes, [0.01 for _ in sample_sizes],
-                c='grey', linestyle='--')
-        # plt.yscale('log')
-        ax.set_title(s)
-        ax.set_ylabel('p-value')
-        ax2.set_ylabel('KS statistic')
-        ax.set_xlabel(f'n of samples (total: {len(data)})')
-        if ax == axs[0]:
-            ax.legend(loc='upper right')
-        ax.text(max_n * 0.9, 0.05, 'p=0.01')
-
-    outname = str(i[0].system).split('_', 1)[0]
-    plt.savefig(PATH / 'notebooks' / 'chol_tilt' / 'components_z_ks_statistics' /
-                f'components_z_2d_ks_statistics_{outname}_{trj_slices[0].b}-{trj_slices[0].e}-{trj_slices[0].dt}.png',
-                bbox_inches='tight')
-    break
-
+components_z_2d_ks_statistics(trj_slices)
 
 # %%
-df
-#
+fig, ax = plt.subplots()
+y = '% of horizontal component'
+y2 = '% of vertical component'
+s = 'dmpc_chol30'
+ax2 = ax.twinx()
+data = df[(df['system'] == s.split('_chol', 1)[0])
+          & (df['CHL amount, %'] == int(s.split('_chol', 1)[1]))]
+sns.histplot(data=data,
+            x='z', y=y, ax=ax2,
+            bins=50,
+            # alpha=0.5,
+            stat='density')
+if y2 is not None:
+    sns.histplot(data=data,
+                x='z', y=y2, ax=ax2,
+                bins=50,
+                # alpha=0.5,
+                color='C1', stat='density')
+
+try:
+    plot_density_profile(ax,
+                         TrajectorySlice(
+                             System(
+                                 trj_slices[0].system.path, s),
+                             trj_slices[0].b, trj_slices[0].e, trj_slices[0].dt),
+                         groups=['chols'], color='k')
+    plot_density_profile(ax,
+                         TrajectorySlice(
+                             System(
+                                 trj_slices[0].system.path, s),
+                             trj_slices[0].b, trj_slices[0].e, trj_slices[0].dt),
+                         groups=['phosphates'], color='C3')
+except FileNotFoundError as e:
+    print(e)

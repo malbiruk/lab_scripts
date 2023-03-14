@@ -295,8 +295,10 @@ def angle_components_3d(trj_slices, comp_b, comp_e, comp_dt):
 trj_slices = [s for s in trj_slices if 'chol' in s.system.name]
 if not (PATH / 'notebooks' / 'integral_parameters' /
         f'chl_tilt_{trj_slices[0].b}-{trj_slices[0].e}-{trj_slices[0].dt}_with_comps.csv').is_file():
-        chl_tilt_angle(trj_slices, no_comps=True)
+        # chl_tilt_angle(trj_slices, no_comps=True)
+        print('in progress...')
         add_comps_to_chl_tilt(chl_tilt_b, chl_tilt_e, chl_tilt_dt)
+        print('done.')
 
 # %%
 trj = trj_slices[0]
@@ -304,7 +306,7 @@ trj.generate_slice_with_gmx()
 u = mda.Universe(f'{trj.system.dir}/md/md.tpr',
                  f'{trj.system.dir}/md/pbcmol_{trj.b}-{trj.e}-{trj.dt}.xtc')
 
-# def obtain_slice_of trajectory()
+
 
 
 # %%

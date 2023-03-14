@@ -170,12 +170,12 @@ def angl_dens_multiple_plot(experiments: dict,
                 ax2 = ax.twinx()
                 data = df[(df['system'] == s.split('_chol', 1)[0])
                           & (df['CHL amount, %'] == int(s.split('_chol', 1)[1]))]
-                sns.kdeplot(data=data,
+                sns.histplot(data=data,
                             x='z', y=y, ax=ax2,
                             bins=50, alpha=0.5,
                             stat='density')
                 if y2 is not None:
-                    sns.kdeplot(data=data,
+                    sns.histplot(data=data,
                                 x='z', y=y2, ax=ax2,
                                 bins=50, alpha=0.5,
                                 color='C1', stat='density')
@@ -286,14 +286,14 @@ def components_z_2d_ks_statistics(trj_slices: list[TrajectorySlice],
             print(f'done, plotting...')
 
             ax2 = ax.twinx()
-            ax.plot(sample_sizes, p_values_rand, c='k', marker='s', ms=3, linestyle='-',
-                    label='randomly generated 2D normal distributions (p-value)')
-            ax2.plot(sample_sizes, d_values_rand, c='k', marker='o', ms=2, linestyle=':',
-                     label='randomly generated 2D normal distributions (KS statistic)')
-            ax.plot(sample_sizes, p_values_test, c='r', marker='s', ms=3,
-                    label='Z - % of horizontal vs vertical component (p-value)')
-            ax2.plot(sample_sizes, d_values_test, c='r', marker='o', ms=2, linestyle=':',
-                     label='Z - % of horizontal vs vertical component (KS statistic)')
+            l1 = ax.plot(sample_sizes, p_values_rand, c='k', marker='s', ms=3, linestyle='-',
+                         label='randomly generated 2D normal distributions (p-value)')
+            l2 = ax2.plot(sample_sizes, d_values_rand, c='k', marker='o', ms=2, linestyle=':',
+                          label='randomly generated 2D normal distributions (KS statistic)')
+            l3 = ax.plot(sample_sizes, p_values_test, c='r', marker='s', ms=3,
+                         label='Z - % of horizontal vs vertical component (p-value)')
+            l4 = ax2.plot(sample_sizes, d_values_test, c='r', marker='o', ms=2, linestyle=':',
+                          label='Z - % of horizontal vs vertical component (KS statistic)')
             ax.plot(sample_sizes, [0.01 for _ in sample_sizes],
                     c='grey', linestyle='--')
             # plt.yscale('log')
@@ -302,10 +302,12 @@ def components_z_2d_ks_statistics(trj_slices: list[TrajectorySlice],
             ax2.set_ylabel('KS statistic')
             ax.set_xlabel(f'n of samples (total: {len(data)})')
             if ax == axs[0]:
-                ax.legend(loc='upper right')
+                lns = l1 + l2 + l3 + l4
+                labs = [l.get_label() for l in lns]
+                ax.legend(lns, labs, loc='upper right')
             ax.text(max_n * 0.9, 0.05, 'p=0.01')
 
-        outname = str(i[0].system).split('_', 1)[0]
+        outname = str(i[0].system).rsplit('_', 1)[0]
         plt.savefig(PATH / 'notebooks' / 'chol_tilt' / 'components_z_ks_statistics' /
                     f'components_z_2d_ks_statistics_{outname}_{trj_slices[0].b}-{trj_slices[0].e}-{trj_slices[0].dt}.png',
                     bbox_inches='tight')
