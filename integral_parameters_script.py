@@ -51,10 +51,12 @@ def get_chl_tilt(trj: TrajectorySlice) -> None:
                          refresh_offsets=True)
         chols = u.residues[u.residues.resnames == 'CHL'].atoms
         n_chol = len(u.residues[u.residues.resnames == 'CHL'])
+        # adding 1 here because gromacs index files start atom numeration from 1
+        # and in MDAnalysis atom numeration starts with 0
         c3 = ' '.join(
-            list(map(str, chols.select_atoms('name C3').indices.tolist())))
+            list(map(str, (chols.select_atoms('name C3').indices + 1).tolist())))
         c17 = ' '.join(
-            list(map(str, chols.select_atoms('name C17').indices.tolist())))
+            list(map(str, (chols.select_atoms('name C17').indices + 1).tolist())))
 
         with open(f'{trj.system.dir}/ch3_ch17.ndx', 'w', encoding='utf-8') as f:
             f.write(f'[C3]\n{c3}\n[C17]\n{c17}\n')
@@ -81,8 +83,11 @@ def break_tilt_into_components(ax: axes._subplots.Axes, trj: TrajectorySlice) ->
     lines = opener(f'{trj.system.path}/notebooks/chol_tilt/'
                    f'{trj.system.name}_{trj.b}-{trj.e}-{trj.dt}_tilt.xvg')
 
-    a = np.array(
-        list(map(float, flatten([i.split()[1:] for i in lines])))) - 90
+    # a = np.array(
+    #     list(map(float, flatten([i.split()[1:] for i in lines])))) - 90
+
+    a = list(map(float, flatten([i.split()[1:] for i in lines])))
+    a = np.array([i if i <= 90 else i - 180 for i in a])
 
     def func(x, *params):
         y = np.zeros_like(x)
@@ -108,16 +113,13 @@ def break_tilt_into_components(ax: axes._subplots.Axes, trj: TrajectorySlice) ->
     line = my_kde.lines[0]
     x, y = line.get_data()
 
-    guess = [-20, 0.005, 28, -6, 0.03, 4.5, 6, 0.03, 4.5, 24, 0.005, 28]
+    guess = [-30, 0.005, 20, -15, 0.02, 7, 15, 0.02, 7, 30, 0.005, 20]
     try:
         popt, _, _, _, _ = curve_fit(func, x, y, p0=guess, full_output=True)
         df = pd.DataFrame(popt.reshape(int(len(guess) / 3), 3),
                           columns=['ctr', 'amp', 'wid'])
         df['area'] = df.apply(lambda row: integrate.quad(func, np.min(
             x), np.max(x), args=(row['ctr'], row['amp'], row['wid']))[0], axis=1)
-        df.to_csv(
-            f'{trj.system.path}/notebooks/chol_tilt/'
-            f'{trj.system.name}_{trj.b}-{trj.e}-{trj.dt}_4_comps.csv', index=False)
 
         fit = func(x, *popt)
 
@@ -136,6 +138,10 @@ def break_tilt_into_components(ax: axes._subplots.Axes, trj: TrajectorySlice) ->
         ax.plot(x, func(x, *popt[3:6]), '--')
         ax.plot(x, func(x, *popt[6:9]), '--')
         ax.plot(x, func(x, *popt[9:]), '--')
+
+        df.to_csv(
+            f'{trj.system.path}/notebooks/chol_tilt/'
+            f'{trj.system.name}_{trj.b}-{trj.e}-{trj.dt}_4_comps.csv', index=False)
 
     except RuntimeError as e:
         print(f'couldn\'t curve_fit for {trj.system}: ', e)
@@ -432,10 +438,6 @@ def plot_violins(csv: PosixPath, y: str, experiments: dict, to_rus: dict) -> Non
         plt.close()
 
     df = pd.read_csv(csv)
-    # FIXME droppig wrong dspc for now
-    df = df[(df['system'] != 'dspc') | (
-        (df['CHL amount, %'] != 10) & (df['CHL amount, %'] != 50))]
-
     df = df[df.columns.intersection(
         ['system', 'experiment', 'CHL amount, %', y])]
 
@@ -509,8 +511,8 @@ def chl_tilt_summary(trj_slices: list[TrajectorySlice]) -> None:
                        f'{trj.system.name}_{trj.b}-{trj.e}-{trj.dt}_tilt.xvg')
         timepoint = np.array(
             list(map(int, [i.split()[0] for i in lines])))
-        a = np.array(
-            list(map(float, flatten([i.split()[1:] for i in lines])))) - 90
+        a = list(map(float, flatten([i.split()[1:] for i in lines])))
+        a = np.array([i if i <=90 else i-180 for i in a ])
         n_chols = int(a.shape[0] / timepoint.shape[0])
         timepoints = [i for i in timepoint for _ in range(n_chols)]
         chl_indices = flatten([list(range(n_chols)) for _ in timepoint])
@@ -562,8 +564,8 @@ def chl_tilt_angle(trj_slices: list[TrajectorySlice], experiments: dict = EXPERI
                 plt.close()
         print('plotting results...')
 
-    plot_violins(path / 'notebooks' / 'integral_parameters' / 'chl_tilt_to_plot.csv',
-                 'α, °', experiments, to_rus)
+        plot_violins(path / 'notebooks' / 'integral_parameters' / 'chl_tilt_to_plot.csv',
+                     'α, °', experiments, to_rus)
     print('done.')
 
 
@@ -819,7 +821,7 @@ def main():
                'thickness': thickness,
                'arperlip': arperlip,
                'scd': scd,
-               'chl_tilt_angle': chl_tilt_angle,
+               # 'chl_tilt_angle': chl_tilt_angle,
                'chl_p_distance': chl_p_distance}
 
     to_plot = {'dp': density_profiles,
@@ -841,6 +843,8 @@ def main():
         for i in to_plot:
             to_plot[i](experiments, trj_slices, to_rus)
 
+
+# %%
 
 if __name__ == '__main__':
     main()
