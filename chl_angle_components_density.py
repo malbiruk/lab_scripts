@@ -8,23 +8,97 @@ import sys
 from pathlib import Path
 import numpy as np
 import pandas as pd
+import MDAnalysis as mda
+from MDAnalysis.analysis import leaflet
 import matplotlib.pyplot as plt
-from mpl_toolkits.mplot3d import Axes3D
 import seaborn as sns
 
 from modules import ndtest
-from modules.general import flatten, opener, sparkles, duration
+from modules.general import (
+    flatten, opener, sparkles, duration, chunker, print_1line, get_keys_by_value)
 from modules.traj import System, TrajectorySlice
 from modules.density import plot_density_profile
 from modules.constants import PATH, TO_RUS, EXPERIMENTS
-from integral_parameters_script import chl_tilt_angle
+from integral_parameters_script import chl_tilt_angle, plot_violins
 
 
-def add_comps_to_chl_tilt(path_to_df, b_comp=None, e_comp=None, dt_comp=None):
+def plot_comps_angle_vals(csv: Path, b_comp: int, e_comp: int, dt_comp: int):
+    '''
+    plot components angle values
+    '''
+    df = pd.read_csv(csv)
+    df['α, °'] = df['α, °'].abs()
+
+    df['component'] = df['1'].apply(
+        lambda x: 'vertical' if x == 1 else ('horizontal' if x == 0 else x))
+
+    df['experiment'] = df['system'].apply(
+        lambda x: get_keys_by_value(x, EXPERIMENTS))
+    df = df.explode('experiment')
+    order = {'dmpc': 0, 'dppc_325': 1, 'dspc': 2, 'popc': 3,
+             'dopc': 4, 'dopc_dops50': 5, 'dops': 6}
+    df = df.sort_values(by=['system'], key=lambda x: x.map(order))
+    df = df.sort_values(
+        by=['CHL amount, %', 'component'], ascending=[True, False])
+
+    fig, axs = plt.subplots(1, 3, figsize=(23, 7), sharey=True)
+    for exp, ax in zip(EXPERIMENTS, axs):
+        df1 = df[df['experiment'] == exp]
+        hue = df1['CHL amount, %'].astype(
+            str) + ', ' + df1['component'].astype(str)
+        g = sns.violinplot(data=df1, x='system', y='α, °', hue=hue,
+                           cut=0, palette='RdYlGn_r', inner='quartile', ax=ax)
+        ax.set_title(exp)
+        if ax != axs[-1]:
+            g.legend_.remove()
+        if ax != axs[0]:
+            ax.set_ylabel('')
+    fig.savefig(PATH / 'notebooks' / 'integral_parameters' / 'components' /
+                f'angle_components_{b_comp}-{e_comp}-{dt_comp}.png',
+                bbox_inches='tight')
+
+
+def plot_comps_ratios(b_comp: int, e_comp: int, dt_comp: int):
+    '''
+    plot ratios of components, also save means and stds
+    '''
+    df = pd.read_csv(PATH / 'notebooks' / 'integral_parameters' /
+                     f'chl_tilt_{b_comp}-{e_comp}-{dt_comp}_with_comps.csv'
+                     )
+    df1 = df.groupby(['system', 'CHL amount, %', 'timepoint'],
+                     as_index=False).agg(
+        sum1=('1', 'sum'), count1=('1', 'count'),
+        sum2=('2', 'sum'), count2=('2', 'count'))
+    df1['% of vertical component'] = df1['sum1'] / df1['count1'] * 100
+    df1['% of horizontal component'] = df1['sum2'] / df1['count2'] * 100
+    df1.to_csv(PATH / 'notebooks' / 'integral_parameters' / 'components' /
+               f'angle_components_ratio_{b_comp}-{e_comp}-{dt_comp}.csv', index=False)
+    plot_violins(
+        PATH / 'notebooks' / 'integral_parameters' / 'components' /
+        f'angle_components_ratio_{b_comp}-{e_comp}-{dt_comp}.csv', '% of horizontal component',
+        EXPERIMENTS, TO_RUS)
+    plot_violins(
+        PATH / 'notebooks' / 'integral_parameters' / 'components' /
+        f'angle_components_ratio_{b_comp}-{e_comp}-{dt_comp}.csv', '% of vertical component',
+        EXPERIMENTS, TO_RUS)
+    df2 = df1.groupby(
+        ['system', 'CHL amount, %'], as_index=False).agg(
+        vertical_mean=('% of vertical component', 'mean'),
+        vertical_std=('% of vertical component', 'std'),
+        horizontal_mean=('% of horizontal component', 'mean'),
+        horizontal_std=('% of horizontal component', 'std')
+    )
+    df2.to_csv(PATH / 'notebooks' / 'integral_parameters' / 'components' /
+               f'angle_components_ratio_{b_comp}-{e_comp}-{dt_comp}_mean_std.csv', index=False)
+
+
+def add_comps_to_chl_tilt(path_to_df, b, e, dt,
+                          b_comp=None, e_comp=None, dt_comp=None,
+                          plot_comps_ratio=False):
     '''
     add info which component is every angle in chl_tilt_{b}-{e}-{dt}.to_csv
     (file produced by chl_tilt_angle() function)
-    df should have columns 'system', 'α, °' 'CHL amount, %'
+    df should have columns 'system', 'α, °', 'CHL amount, %'
     '''
     df = pd.read_csv(path_to_df)
     print('determining angle components...')
@@ -40,6 +114,16 @@ def add_comps_to_chl_tilt(path_to_df, b_comp=None, e_comp=None, dt_comp=None):
     df = df.drop(columns=['comp']).drop_duplicates()
     df.to_csv(str(path_to_df).rsplit('.', 1)[0] + '_with_comps.csv',
               index=False)
+
+    if plot_comps_ratio:
+        print('plotting components angle values...')
+        plot_comps_angle_vals(PATH / 'notebooks' / 'integral_parameters' /
+                              f'chl_tilt_{b_comp}-{e_comp}-{dt_comp}_with_comps.csv',
+                              b_comp, e_comp, dt_comp)
+        print('poltting components ratio...')
+        plot_comps_ratios(PATH / 'notebooks' / 'integral_parameters' /
+                          f'chl_tilt_{b_comp}-{e_comp}-{dt_comp}_with_comps.csv',
+                          b_comp, e_comp, dt_comp)
     print('done.')
 
 
@@ -285,7 +369,7 @@ def components_z_2d_ks_statistics(trj_slices: list[TrajectorySlice],
                                              distr2[:, 1], extra=True)
                 d_values_rand.append(d_val)
                 p_values_rand.append(p_val)
-            print(f'done, plotting...')
+            print('done, plotting...')
 
             ax2 = ax.twinx()
             l1 = ax.plot(sample_sizes, p_values_rand, c='k', marker='s', ms=3, linestyle='-',
@@ -310,9 +394,55 @@ def components_z_2d_ks_statistics(trj_slices: list[TrajectorySlice],
             ax.text(max_n * 0.9, 0.05, 'p=0.01')
 
         outname = str(i[0].system).rsplit('_', 1)[0]
-        plt.savefig(PATH / 'notebooks' / 'chol_tilt' / 'components_z_ks_statistics' /
-                    f'components_z_2d_ks_statistics_{outname}_{trj_slices[0].b}-{trj_slices[0].e}-{trj_slices[0].dt}.png',
-                    bbox_inches='tight')
+        fig.savefig(
+            PATH / 'notebooks' / 'chol_tilt' / 'components_z_ks_statistics' /
+            f'components_z_2d_ks_statistics_{outname}_'
+            f'{trj_slices[0].b}-{trj_slices[0].e}-{trj_slices[0].dt}.png',
+            bbox_inches='tight')
+
+
+def get_no_and_both_components_percentage(infile: Path, outfile: Path):
+    '''
+    generate and save table with % of molecules without angle components
+    and % of molecules with both components
+    infile should be _coords_with_comps.csv
+    '''
+    df = pd.read_csv(infile)
+    both_comps = df.drop(columns=['1', '2'])
+    no_comps = (both_comps.drop_duplicates()
+                .groupby(['system', 'CHL amount, %'])
+                .agg(nan_sum=('nan', 'sum'), count=('nan', 'count')))
+    no_comps['nan, %'] = no_comps['nan_sum'] / no_comps['count'] * 100
+    dups = both_comps[both_comps.duplicated()]
+    dups = dups.groupby(['system', 'CHL amount, %']).agg(
+        dup_count=('nan', 'count'))
+    non_dup_comps = pd.concat((no_comps, dups), axis=1)
+    non_dup_comps['both comps, %'] = non_dup_comps['dup_count'] / \
+        non_dup_comps['count'] * 100
+    non_dup_comps.to_csv(outfile)
+
+
+def get_n_of_chl_in_monolayers(infile: Path, outfile: Path):
+    '''
+    generate and save table with n of CHL molecules in monolayers
+    infile should be _coords_with_comps.csv
+    '''
+    df = pd.read_csv(infile)
+    df_wo_comps = df.drop(columns=['1', '2']).drop_duplicates()
+    df_wo_comps = df_wo_comps.groupby(
+        ['timepoint', 'system', 'CHL amount, %']
+    ).agg(monolayer_count=('monolayer', 'value_counts'))
+    monolayer = df_wo_comps.reset_index().pivot(
+        columns='monolayer', values='monolayer_count')
+    monolayer['upper'] = monolayer['upper'].shift(-1)
+    uneven_monolayers = pd.concat(
+        (df_wo_comps.reset_index().drop(
+            columns=['monolayer', 'monolayer_count']).drop_duplicates(),
+            monolayer.dropna().astype(int)), join='inner',
+        axis=1)
+    uneven_monolayers.sort_values(
+        ['system', 'CHL amount, %', 'timepoint']
+    ).drop(columns=['timepoint']).drop_duplicates().to_csv(outfile, index=False)
 
 
 def generate_coords_comps_table(trj_slices: list[TrajectorySlice],
@@ -323,12 +453,15 @@ def generate_coords_comps_table(trj_slices: list[TrajectorySlice],
     then calculating components for this DataFrame
     chl_tilt_b, chl_tilt_e, chl_tilt_dt -- for components
     '''
+    trj_slices = [s for s in trj_slices if 'chol' in s.system.name]
+
     if not (PATH / 'notebooks' / 'integral_parameters' /
-            f'chl_tilt_{trj_slices[0].b}-{trj_slices[0].e}-{trj_slices[0].dt}_with_comps.csv').is_file():
+            f'chl_tilt_{trj_slices[0].b}-{trj_slices[0].e}-{trj_slices[0].dt}.csv').is_file():
         chl_tilt_angle(trj_slices, no_comps=True)
     df = pd.read_csv(PATH / 'notebooks' /
                      'integral_parameters' /
                      f'chl_tilt_{trj_slices[0].b}-{trj_slices[0].e}-{trj_slices[0].dt}.csv')
+    df = df.drop_duplicates(ignore_index=True)
 
     x_com = []
     y_com = []
@@ -336,34 +469,59 @@ def generate_coords_comps_table(trj_slices: list[TrajectorySlice],
     x_o = []
     y_o = []
     z_o = []
+    monolayer = []
+    zmem = []
+    x_box = []
+    y_box = []
+    z_box = []
 
     print('collecting coords...')
 
-    for trj in trj_slices:
+    for trj in list(dict.fromkeys(trj_slices)):
         print(trj)
         trj.generate_slice_with_gmx()
         u = mda.Universe(f'{trj.system.dir}/md/md.tpr',
                          f'{trj.system.dir}/md/pbcmol_{trj.b}-{trj.e}-{trj.dt}.xtc')
 
         for ts in u.trajectory:
+            cutoff, n = leaflet.optimize_cutoff(
+                u, 'name P* or name O3', dmin=7, dmax=17)
+            print_1line(f'cutoff {cutoff} A, {n} groups')
+            leaflet_ = leaflet.LeafletFinder(
+                u, 'name P* or name O3', pbc=True, cutoff=cutoff)
+            if len(leaflet_.groups()) != 2:
+                print(f'{len(leaflet_.groups())} groups found...')
+            leaflet_0 = leaflet_.group(0)
+            leaflet_1 = leaflet_.group(1)
+            zmem_tmp = 0.5 * (leaflet_1.centroid() + leaflet_0.centroid())[2]
             chols = u.select_atoms("resname CHL")
+
+            if (np.sum(np.isin(chols.residues.resids, leaflet_1.resids)) == 0 or
+               np.sum(np.isin(chols.residues.resids, leaflet_0.resids)) == 0):
+                print('CHL not presented in monolayer!')
+
             chols_coms = {c: i.atoms.center_of_mass()
                           for c, i in enumerate(chols.residues)}
             o3_positions = {c: i.atoms.select_atoms("name O3").positions[0]
                             for c, i in enumerate(chols.residues)}
 
             for mol in chols_coms:
-                # df.loc[(df['system'] == str(trj.system).rsplit('_chol',1)[0]) &
-                #    (df['timepoint'] == ts.time) &
-                #    (df['chl_index'] == mol) &
-                #    (df['CHL amount, %'] == str(trj.system).rsplit('_chol',1)[1]),
-                #    'x_com'] = chols_coms[mol][0]
                 x_com.append(chols_coms[mol][0])
                 y_com.append(chols_coms[mol][1])
                 z_com.append(chols_coms[mol][2])
                 x_o.append(o3_positions[mol][0])
                 y_o.append(o3_positions[mol][1])
                 z_o.append(o3_positions[mol][2])
+                if chols.residues.resids[mol] in leaflet_0.resids:
+                    monolayer.append('upper')
+                elif chols.residues.resids[mol] in leaflet_1.resids:
+                    monolayer.append('lower')
+                else:
+                    monolayer.append('na')
+                zmem.append(zmem_tmp)
+                x_box.append(ts.dimensions[0])
+                y_box.append(ts.dimensions[1])
+                z_box.append(ts.dimensions[2])
 
     print('assigning lists...')
 
@@ -373,60 +531,209 @@ def generate_coords_comps_table(trj_slices: list[TrajectorySlice],
     df['x_o'] = x_o
     df['y_o'] = y_o
     df['z_o'] = z_o
+    df['monolayer'] = monolayer
+    df['zmem'] = zmem
+    df['x_box'] = x_box
+    df['y_box'] = y_box
+    df['z_box'] = z_box
 
     df.to_csv(PATH / 'notebooks' / 'integral_parameters' /
                      f'chl_tilt_{trj_slices[0].b}-{trj_slices[0].e}-{trj_slices[0].dt}_coords.csv',
                      index=False)
 
-    add_comps_to_chl_tilt((PATH / 'notebooks' / 'integral_parameters' /
-                          f'chl_tilt_{trj_slices[0].b}-{trj_slices[0].e}-{trj_slices[0].dt}_coords.csv'),
-                          chl_tilt_b, chl_tilt_e, chl_tilt_dt)
+    add_comps_to_chl_tilt(
+        PATH / 'notebooks' / 'integral_parameters' /
+        f'chl_tilt_{trj_slices[0].b}-{trj_slices[0].e}-{trj_slices[0].dt}_coords.csv',
+        chl_tilt_b, chl_tilt_e, chl_tilt_dt)
+
+    get_no_and_both_components_percentage(
+        infile=PATH / 'notebooks' / 'integral_parameters' /
+        f'chl_tilt_{trj_slices[0].b}-{trj_slices[0].e}-'
+        f'{trj_slices[0].dt}_coords_with_comps.csv',
+        outfile=PATH / 'notebooks' / 'integral_parameters' /
+        f'chl_tilt_{trj_slices[0].b}-{trj_slices[0].e}-'
+        f'{trj_slices[0].dt}_no_and_both_comps.csv')
+    get_n_of_chl_in_monolayers(
+        infile=PATH / 'notebooks' / 'integral_parameters' /
+        f'chl_tilt_{trj_slices[0].b}-{trj_slices[0].e}-'
+        f'{trj_slices[0].dt}_coords_with_comps.csv',
+        outfile=PATH / 'notebooks' / 'integral_parameters' /
+        f'chl_tilt_{trj_slices[0].b}-{trj_slices[0].e}-'
+        f'{trj_slices[0].dt}_n_of_chl_in_monolayers.csv')
 
 
 def angle_components_3d(trj_slices: list[TrajectorySlice],
                         comp_b: int, comp_e: int, comp_dt: int):
     '''
-    plotting 3d graphs of CHL COMs and O3 positions
+    plotting 3d scatter plots of CHL COMs and O3 positions
     with colorcoding the amount of horizontal component (red - 2 comp, green - 1)
     '''
     trj_slices = [s for s in trj_slices if 'chol' in s.system.name]
 
+    if not (
+        PATH / 'notebooks' / 'integral_parameters' /
+        f'chl_tilt_{trj_slices[0].b}-{trj_slices[0].e}-{trj_slices[0].dt}_coords_with_comps.csv'
+    ).is_file():
+        generate_coords_comps_table(trj_slices, comp_b, comp_e, comp_dt)
+
+    df = pd.read_csv(
+        PATH / 'notebooks' / 'integral_parameters' /
+        f'chl_tilt_{trj_slices[0].b}-{trj_slices[0].e}-{trj_slices[0].dt}_coords_with_comps.csv'
+    )
+    print('averaging data...')
+    averaged_df = df.groupby(
+        ['system', 'CHL amount, %', 'chl_index'], as_index=False).mean()
+    for trj in trj_slices:
+        print(f'plotting {str(trj.system)}...')
+        data = averaged_df[
+            (averaged_df['system'] == str(trj.system).rsplit('_chol', 1)[0]) &
+            (averaged_df['CHL amount, %'] == int(str(trj.system).rsplit('_chol', 1)[1]))]
+        fig = plt.figure(figsize=(10, 8))
+        ax = fig.add_subplot(projection='3d')
+        x = np.dstack((data['x_com'].to_numpy(), data['x_o'].to_numpy()))
+        y = np.dstack((data['y_com'].to_numpy(), data['y_o'].to_numpy()))
+        z = np.dstack((data['z_com'].to_numpy(), data['z_o'].to_numpy()))
+        im = ax.scatter(data['x_com'], data['y_com'], data['z_com'], c=data['2'],
+                        cmap='RdYlGn_r', ec='k', s=40)
+        fig.colorbar(im, ax=ax, fraction=0.02, pad=0.06,
+                     label='share of horizontal component')
+        for i in range(len(x[0])):
+            ax.plot(x[0][i], y[0][i], z[0][i], color='gray', lw=1)
+        ax.set_title(str(trj.system) +
+                     f' ({trj_slices[0].b}-{trj_slices[0].e} ns, dt={trj_slices[0].dt} ps)')
+        ax.set_xlabel('X, Å')
+        ax.set_ylabel('Y, Å')
+        ax.set_zlabel('Z, Å')
+        fig.savefig(
+            PATH / 'notebooks' / 'chol_tilt' / 'components_3d_plots' /
+            f'{str(trj.system)}_{trj_slices[0].b}-{trj_slices[0].e}-{trj_slices[0].dt}'
+            '_tilt_comps_3d.png', bbox_inches='tight')
+        print('done.')
+
+
+def angle_components_2d(trj_slices: list[TrajectorySlice],
+                        comp_b: int, comp_e: int, comp_dt: int,
+                        draw_o_pos=False):
+    '''
+    plotting 2d (angle - distance to bilayer center) scatter plots of CHL COMs positions
+    (averaged data)
+    with colorcoding the amount of horizontal component (red - 2 comp, green - 1)
+    '''
+    trj_slices = [s for s in trj_slices if 'chol' in s.system.name]
     if not (PATH / 'notebooks' / 'integral_parameters' /
             f'chl_tilt_{trj_slices[0].b}-{trj_slices[0].e}-{trj_slices[0].dt}_coords_with_comps.csv'
             ).is_file():
         generate_coords_comps_table(trj_slices, comp_b, comp_e, comp_dt)
-    else:
-        df = pd.read_csv(PATH / 'notebooks' / 'integral_parameters' /
-                         f'chl_tilt_{trj_slices[0].b}-{trj_slices[0].e}-{trj_slices[0].dt}_coords_with_comps.csv'
-                         )
-        print('averaging data...')
-        averaged_df = df.groupby(
-            ['system', 'CHL amount, %', 'chl_index'], as_index=False).mean()
-        for trj in trj_slices:
-            print(f'plotting {str(trj.system)}...'')
-            data = averaged_df[(averaged_df['system'] == str(trj.system).rsplit('_chol', 1)[0]) &
-                               (averaged_df['CHL amount, %'] == int(str(trj.system).rsplit('_chol', 1)[1]))]
-            data = data.rename(columns={'z_xom': 'z_com'})
-            fig = plt.figure(figsize=(10, 8))
-            ax = fig.add_subplot(projection='3d')
-            x = np.dstack((data['x_com'].to_numpy(), data['x_o'].to_numpy()))
-            y = np.dstack((data['y_com'].to_numpy(), data['y_o'].to_numpy()))
-            z = np.dstack((data['z_com'].to_numpy(), data['z_o'].to_numpy()))
-            im = ax.scatter(data['x_com'], data['y_com'], data['z_com'], c=data['2'],
-                            cmap='RdYlGn_r', ec='k', s=40)
-            fig.colorbar(im, ax=ax, fraction=0.02, pad=0.06,
-                         label='share of horizontal component')
-            for i in range(len(x[0])):
-                ax.plot(x[0][i], y[0][i], z[0][i], color='gray', lw=1)
-            ax.set_title(str(trj.system) + ' (199-200 ns, dt=10 ps)')
-            ax.set_xlabel('X, Å')
-            ax.set_ylabel('Y, Å')
-            ax.set_zlabel('Z, Å')
-            fig.savefig(PATH / 'notebooks' / 'chol_tilt' / 'components_3d_plots' /
-                        f'tilt_comps_3d_{trj_slices[0].b}-{trj_slices[0].e}-{trj_slices[0].dt}.png',
-                        bbox_inches='tight'
-                        )
-            print('done.')
+
+    df = pd.read_csv(
+        PATH / 'notebooks' / 'integral_parameters' /
+        f'chl_tilt_{trj_slices[0].b}-{trj_slices[0].e}-{trj_slices[0].dt}_coords_with_comps.csv')
+
+    print('averaging data...')
+    averaged_df = df.groupby(
+        ['system', 'CHL amount, %', 'chl_index'], as_index=False).mean(numeric_only=True)
+
+    c = 0
+    for exp in chunker(trj_slices, 9):
+        fig, axs = plt.subplots(3, 3, figsize=(
+            10, 12), sharex=True, sharey=True)
+        fig.suptitle(tuple(EXPERIMENTS.keys())[c])
+        print(f'plotting {tuple(EXPERIMENTS.keys())[c]}...')
+        for syst, ax_row in zip(chunker(exp, 3), axs):
+            for trj, ax in zip(syst, ax_row):
+                print(f'plotting {str(trj.system)}...')
+                data = averaged_df[
+                    (averaged_df['system'] == str(trj.system).rsplit('_chol', 1)[0]) &
+                    (averaged_df['CHL amount, %'] == int(str(trj.system).rsplit('_chol', 1)[1]))]
+                im = ax.scatter(np.abs(data['z_com'] - data['zmem']), np.abs(data['α, °']),
+                                c=data['2'], cmap='RdYlGn_r', ec='k')
+
+                if draw_o_pos:
+                    z = np.dstack(
+                        (data['z_com'].to_numpy(), data['z_o'].to_numpy()))
+                    alpha = np.dstack(
+                        (np.abs(data['α, °']), np.abs(data['α, °'])))
+                    for i in range(len(z[0])):
+                        ax.plot(z[0][i], alpha[0][i], color='gray', lw=1)
+
+                ax.set_title(trj.system)
+                if ax in axs[:, 0]:
+                    ax.set_ylabel('α, °')
+                if ax == axs[-1, 1]:
+                    ax.set_xlabel('Distance to bilayer center, Å')
+        cbar_ax = fig.add_axes([.92, 0.34, 0.01, 0.3])
+        cbar = fig.colorbar(im, cax=cbar_ax, ticks=np.linspace(0, 1, 5))
+        cbar.set_ticklabels((100 * np.linspace(0, 1, 5)).astype('int'))
+        cbar.ax.get_yaxis().labelpad = 15
+        cbar.ax.set_ylabel('% of horizontal component', rotation=270)
+        outname = '_'.join(tuple(EXPERIMENTS.keys())[c].split())
+        plt.savefig(
+            PATH / 'notebooks' / 'chol_tilt' / 'components_2d_plots' /
+            f'tilt_angle_{outname}_{trj_slices[0].b}-{trj_slices[0].e}-{trj_slices[0].dt}.png',
+            bbox_inches='tight')
+        c += 1
+    print('done.')
+
+
+def angle_components_2d_hists(trj_slices: list[TrajectorySlice],
+                              comp_b: int, comp_e: int, comp_dt: int):
+    '''
+    plotting 2d (angle - distance to bilayer center) hists of CHL COMs positions
+    (data is not averaged)
+    vertical component is blue, horizontal is orange
+    '''
+    trj_slices = [s for s in trj_slices if 'chol' in s.system.name]
+    if not (
+        PATH / 'notebooks' / 'integral_parameters' /
+        f'chl_tilt_{trj_slices[0].b}-{trj_slices[0].e}-{trj_slices[0].dt}_coords_with_comps.csv'
+    ).is_file():
+        generate_coords_comps_table(trj_slices, comp_b, comp_e, comp_dt)
+
+    df = pd.read_csv(
+        PATH / 'notebooks' / 'integral_parameters' /
+        f'chl_tilt_{trj_slices[0].b}-{trj_slices[0].e}-{trj_slices[0].dt}_coords_with_comps.csv'
+    )
+    c = 0
+    for exp in chunker(trj_slices, 9):
+        fig, axs = plt.subplots(3, 3, figsize=(
+            10, 12), sharex=True, sharey=True)
+        fig.suptitle(tuple(EXPERIMENTS.keys())[c])
+        print(f'plotting {tuple(EXPERIMENTS.keys())[c]}...')
+        for syst, ax_row in zip(chunker(exp, 3), axs):
+            for trj, ax in zip(syst, ax_row):
+                print(f'plotting {str(trj.system)}...')
+                data = df[(df['system'] == str(trj.system).rsplit('_chol', 1)[0]) &
+                          (df['CHL amount, %'] == int(str(trj.system).rsplit('_chol', 1)[1]))]
+                comp1 = data[data['1'] == 1]
+                comp2 = data[data['2'] == 1]
+
+                sns.histplot(x=np.abs(comp1['z_com'] - comp1['zmem']),
+                             y=np.abs(comp1['α, °']),
+                             color='C0',
+                             stat='density',
+                             bins=30,
+                             ax=ax)
+
+                sns.histplot(x=np.abs(comp2['z_com'] - comp2['zmem']),
+                             y=np.abs(comp2['α, °']),
+                             color='C1',
+                             stat='density',
+                             bins=30,
+                             ax=ax)
+
+                ax.set_title(trj.system)
+                if ax in axs[:, 0]:
+                    ax.set_ylabel('α, °')
+                if ax == axs[-1, 1]:
+                    ax.set_xlabel('Distance to bilayer center, Å')
+
+        plt.savefig(
+            PATH / 'notebooks' / 'chol_tilt' / 'components_2d_plots' /
+            f'tilt_angle_hist_{tuple(EXPERIMENTS.keys())[c]}_'
+            f'{trj_slices[0].b}-{trj_slices[0].e}-{trj_slices[0].dt}.png',
+            bbox_inches='tight')
+        c += 1
+    print('done.')
 
 
 @ sparkles
@@ -451,6 +758,9 @@ def main():
     parser.add_argument('--angle_components_3d',
                         action='store_true',
                         help='draw 3d plots of distribution of components')
+    parser.add_argument('--angle_components_2d',
+                        action='store_true',
+                        help='draw 2d (angle - Z) plots of distribution of components')
     parser.add_argument('-b', '--b', type=int, default=150,
                         help='beginning time in ns, default=150')
     parser.add_argument('-e', '--e', type=int, default=200,
@@ -468,6 +778,7 @@ def main():
         parser.print_usage()
 
     args = parser.parse_args()
+    sns.set(style='ticks', context='talk', palette='muted')
 
     systems = flatten([(i, i + '_chol10', i + '_chol30', i + '_chol50')
                        for i in flatten(EXPERIMENTS.values())])
@@ -486,7 +797,8 @@ def main():
         path_to_df = (PATH / 'notebooks' /
                       'integral_parameters' /
                       f'chl_tilt_{chl_tilt_b}-{chl_tilt_e}-{chl_tilt_dt}.csv')
-        add_comps_to_chl_tilt(path_to_df)
+        add_comps_to_chl_tilt(path_to_df, chl_tilt_b,
+                              chl_tilt_e, chl_tilt_dt, plot_comps_ratio=True)
 
     if args.angle_components_density:
         plot_angles_density(EXPERIMENTS, trj_slices,
@@ -496,6 +808,11 @@ def main():
 
     if args.angle_components_3d:
         angle_components_3d(trj_slices, chl_tilt_b, chl_tilt_e, chl_tilt_dt)
+
+    if args.angle_components_2d:
+        angle_components_2d(trj_slices, chl_tilt_b, chl_tilt_e, chl_tilt_dt)
+        angle_components_2d_hists(
+            trj_slices, chl_tilt_b, chl_tilt_e, chl_tilt_dt)
 
 
 if __name__ == '__main__':

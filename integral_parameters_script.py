@@ -113,7 +113,7 @@ def break_tilt_into_components(ax: axes._subplots.Axes, trj: TrajectorySlice) ->
     line = my_kde.lines[0]
     x, y = line.get_data()
 
-    guess = [-30, 0.005, 20, -15, 0.02, 7, 15, 0.02, 7, 30, 0.005, 20]
+    guess = [-20, 0.005, 10, -15, 0.02, 7, 10, 0.02, 7, 20, 0.005, 10]
     try:
         popt, _, _, _, _ = curve_fit(func, x, y, p0=guess, full_output=True)
         df = pd.DataFrame(popt.reshape(int(len(guess) / 3), 3),
@@ -550,6 +550,7 @@ def chl_tilt_angle(trj_slices: list[TrajectorySlice], experiments: dict = EXPERI
         df.to_csv(
             path / 'notebooks' / 'integral_parameters' / 'chl_tilt_to_plot.csv', index=False)
         print('plotting chol tilts and splitting into components...')
+        records = []
         for trj in trj_slices:
             if not Path(f'{trj.system.path}/notebooks/chol_tilt/'
                         f'{trj.system.name}_{trj.b}-{trj.e}-{trj.dt}_4_comps.csv').is_file():
@@ -562,6 +563,27 @@ def chl_tilt_angle(trj_slices: list[TrajectorySlice], experiments: dict = EXPERI
                             f'{trj.system}_{trj.b}-{trj.e}-{trj.dt}_4_comps.png',
                             bbox_inches='tight', facecolor=fig.get_facecolor())
                 plt.close()
+
+            comps = pd.read_csv(PATH / Path('notebooks/chol_tilt') /
+                                f'{trj.system.name}_{comp_b}-{comp_e}-{comp_dt}_4_comps.csv')
+            comps = comps.sort_values(['ctr']).reset_index(drop=True)
+            records.append((trj.system.name.split('_chol', 1)[0],
+                            trj.system.name.split('_chol', 1)[1],
+                            np.mean(np.abs(comps.loc[[0, 3], 'ctr'])),
+                            np.mean(np.abs(comps.loc[[0, 3], 'wid'])),
+                            np.sum(comps.loc[[0, 3], 'area']),
+                            np.mean(np.abs(comps.loc[[1, 2], 'ctr'])),
+                            np.mean(np.abs(comps.loc[[1, 2], 'wid'])),
+                            np.sum(comps.loc[[1, 2], 'area'])
+                            ))
+
+        df = pd.DataFrame.from_records(
+            records, columns=['system', '% of CHL',
+                              'horizontal_ctr', 'horizontal_wid', 'horizontal_area',
+                              'vertical_ctr', 'vertical_wid', 'vertical_area'])
+
+        df.to_csv(PATH / 'notebooks' / 'integral_parameters' / 'components' /
+                     f'angle_components_parameters_{b_comp}-{e_comp}-{dt_comp}.csv', index=False)
         print('plotting results...')
 
         plot_violins(path / 'notebooks' / 'integral_parameters' / 'chl_tilt_to_plot.csv',
@@ -803,7 +825,7 @@ def main():
     parse arguments and obtain and plot system parameters such as
     density profiles, area per lipid,thickness, Scd and cholesterol tilt angle
     '''
-    sns.set(style='ticks', context='talk', palette='bright')
+    sns.set(style='ticks', context='talk', palette='muted')
     args = parse_args()
     path = PATH
     experiments = EXPERIMENTS
@@ -821,7 +843,6 @@ def main():
                'thickness': thickness,
                'arperlip': arperlip,
                'scd': scd,
-               # 'chl_tilt_angle': chl_tilt_angle,
                'chl_p_distance': chl_p_distance}
 
     to_plot = {'dp': density_profiles,

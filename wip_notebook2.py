@@ -11,6 +11,7 @@
 
 # %%
 
+from integral_parameters_script import plot_violins
 from mpl_toolkits.mplot3d import Axes3D
 from sklearn.cluster import AgglomerativeClustering as AC
 from matplotlib.ticker import MaxNLocator
@@ -19,6 +20,7 @@ from scipy import stats
 from scipy import integrate
 from scipy.optimize import curve_fit
 import MDAnalysis as mda
+from MDAnalysis.analysis.leaflet import LeafletFinder
 import argparse
 import sys
 from pathlib import Path
@@ -28,7 +30,7 @@ import matplotlib.pyplot as plt
 import seaborn as sns
 
 from modules import ndtest
-from modules.general import flatten, opener, sparkles, duration
+from modules.general import flatten, opener, sparkles, duration, chunker, get_keys_by_value
 from modules.traj import System, TrajectorySlice
 from modules.density import plot_density_profile
 from modules.constants import PATH, TO_RUS, EXPERIMENTS
@@ -265,7 +267,7 @@ def generate_coords_comps_table(trj_slices: list[TrajectorySlice],
     chl_tilt_b, chl_tilt_e, chl_tilt_dt -- for components
     '''
     if not (PATH / 'notebooks' / 'integral_parameters' /
-            f'chl_tilt_{trj_slices[0].b}-{trj_slices[0].e}-{trj_slices[0].dt}_with_comps.csv').is_file():
+            f'chl_tilt_{trj_slices[0].b}-{trj_slices[0].e}-{trj_slices[0].dt}.csv').is_file():
         chl_tilt_angle(trj_slices, no_comps=True)
     df = pd.read_csv(PATH / 'notebooks' /
                      'integral_parameters' /
@@ -277,6 +279,7 @@ def generate_coords_comps_table(trj_slices: list[TrajectorySlice],
     x_o = []
     y_o = []
     z_o = []
+    zmem = []
 
     print('collecting coords...')
 
@@ -287,6 +290,10 @@ def generate_coords_comps_table(trj_slices: list[TrajectorySlice],
                          f'{trj.system.dir}/md/pbcmol_{trj.b}-{trj.e}-{trj.dt}.xtc')
 
         for ts in u.trajectory:
+            L = LeafletFinder(u, 'name P*')
+            L0 = L.group(0)
+            L1 = L.group(1)
+            zmem_tmp = 0.5 * (L1.centroid() + L0.centroid())[2]
             chols = u.select_atoms("resname CHL")
             chols_coms = {c: i.atoms.center_of_mass()
                           for c, i in enumerate(chols.residues)}
@@ -305,6 +312,7 @@ def generate_coords_comps_table(trj_slices: list[TrajectorySlice],
                 x_o.append(o3_positions[mol][0])
                 y_o.append(o3_positions[mol][1])
                 z_o.append(o3_positions[mol][2])
+                zmem.append(zmem_tmp)
 
     print('assigning lists...')
 
@@ -314,6 +322,7 @@ def generate_coords_comps_table(trj_slices: list[TrajectorySlice],
     df['x_o'] = x_o
     df['y_o'] = y_o
     df['z_o'] = z_o
+    df['zmem'] = zmem
 
     df.to_csv(PATH / 'notebooks' / 'integral_parameters' /
                      f'chl_tilt_{trj_slices[0].b}-{trj_slices[0].e}-{trj_slices[0].dt}_coords.csv',
@@ -367,140 +376,193 @@ def angle_components_3d(trj_slices: list[TrajectorySlice],
                         )
 
 # %% md
-# ## Creating angle_components_3d function
-#
-# 1. It should add x, y, z coordinates to COMs and O atoms of CHL
-# for each CHL molecule in each timestep specified by user input
-# (add data to subset of larger chl_tilt_with_comps table)
-# > 1. use gmx trjconv to obtain slices of trajectory
-# > 2. run MDAnalysis on it to obtain coords of COMs and O atoms
-#
-# 1. Create 3D plot from this data (average 100 frames 199-200 ns, dt=100 ps)
-# > **averaging:**
-# > - just get mean of coords for each molecule;
-# > - for components: get sum of components for each molecule
-# (i.e. in how many frames there is 1 in both columns '1' and '2', than divide n of frames
-# with 1 in '1' by this sum -- it will be ratio of '1' componen than apply colormap;
-# before this procedure rows with 1 in column 'nan' should be deleted)
+# ## Components parameters depending on system
+
+# %% md
+# ### Comp stats
 
 
 # %%
+sns.set(style='ticks', context='talk', palette='bright')
 systems = flatten([(i, i + '_chol10', i + '_chol30', i + '_chol50')
                    for i in flatten(EXPERIMENTS.values())])
 
 trj_slices = [TrajectorySlice(
     System(PATH, s), 199, 200, 10) for s in systems]
 
-chl_tilt_b, chl_tilt_e, chl_tilt_dt = 100, 200, 100
+b_comp, e_comp, dt_comp = 100, 200, 100
 
+# %%
+df = pd.read_csv(PATH / 'notebooks' / 'integral_parameters' /
+                 f'chl_tilt_{b_comp}-{e_comp}-{dt_comp}_with_comps.csv'
+                 )
+df['α, °'] = df['α, °'].abs()
 
-def angle_components_3d(trj_slices: list[TrajectorySlice],
-                        comp_b: int, comp_e: int, comp_dt: int):
-    '''
-    plotting 3d graphs of CHL COMs and O3 positions
-    with colorcoding the amount of horizontal component (red - 2 comp, green - 1)
-    '''
-    trj_slices = [s for s in trj_slices if 'chol' in s.system.name]
-
-    if not (PATH / 'notebooks' / 'integral_parameters' /
-            f'chl_tilt_{trj_slices[0].b}-{trj_slices[0].e}-{trj_slices[0].dt}_coords_with_comps.csv'
-            ).is_file():
-        generate_coords_comps_table(trj_slices, comp_b, comp_e, comp_dt)
-    else:
-        df = pd.read_csv(PATH / 'notebooks' / 'integral_parameters' /
-                         f'chl_tilt_{trj_slices[0].b}-{trj_slices[0].e}-{trj_slices[0].dt}_coords_with_comps.csv'
-                         )
-        averaged_df = df.groupby(
-            ['system', 'CHL amount, %', 'chl_index'], as_index=False).mean()
-        for trj in trj_slices:
-            data = averaged_df[(averaged_df['system'] == str(trj.system).rsplit('_chol', 1)[0]) &
-                               (averaged_df['CHL amount, %'] == int(str(trj.system).rsplit('_chol', 1)[1]))]
-            data = data.rename(columns={'z_xom': 'z_com'})
-            fig = plt.figure(figsize=(10, 8))
-            ax = fig.add_subplot(projection='3d')
-            x = np.dstack((data['x_com'].to_numpy(), data['x_o'].to_numpy()))
-            y = np.dstack((data['y_com'].to_numpy(), data['y_o'].to_numpy()))
-            z = np.dstack((data['z_com'].to_numpy(), data['z_o'].to_numpy()))
-            im = ax.scatter(data['x_com'], data['y_com'], data['z_com'], c=data['2'],
-                            cmap='RdYlGn_r', ec='k', s=40)
-            fig.colorbar(im, ax=ax, fraction=0.02, pad=0.06,
-                         label='share of horizontal component')
-            for i in range(len(x[0])):
-                ax.plot(x[0][i], y[0][i], z[0][i], color='gray', lw=1)
-            ax.set_title(str(trj.system) + ' (199-200 ns, dt=10 ps)')
-            ax.set_xlabel('X, Å')
-            ax.set_ylabel('Y, Å')
-            ax.set_zlabel('Z, Å')
-            fig.savefig(PATH / 'notebooks' / 'chol_tilt' / 'components_3d_plots' /
-                        f'tilt_comps_3d_{trj_slices[0].b}-{trj_slices[0].e}-{trj_slices[0].dt}.png',
-                        bbox_inches='tight'
-                        )
+df['component'] = df['1'].apply(
+    lambda x: 'vertical' if x == 1 else ('horizontal' if x == 0 else x))
 
 
 # %%
-trj
+df['experiment'] = df['system'].apply(
+    lambda x: get_keys_by_value(x, EXPERIMENTS))
+df = df.explode('experiment')
+order = {'dmpc': 0, 'dppc_325': 1, 'dspc': 2, 'popc': 3,
+         'dopc': 4, 'dopc_dops50': 5, 'dops': 6}
+df = df.sort_values(by=['system'], key=lambda x: x.map(order))
+df = df.sort_values(by=['CHL amount, %', 'component'], ascending=[True, False])
 
 
 # %%
-trj
-data = df[(df['system'] == str(trj.system).rsplit('_chol', 1)[0]) & (df['timepoint'] == 199000) &
-          (df['CHL amount, %'] == int(str(trj.system).rsplit('_chol', 1)[1]))]
-data = data.rename(columns={'z_xom': 'z_com'})
-fig = plt.figure(figsize=(10, 8))
-ax = fig.add_subplot(projection='3d')
-x = np.dstack((data['x_com'].to_numpy(), data['x_o'].to_numpy()))
-y = np.dstack((data['y_com'].to_numpy(), data['y_o'].to_numpy()))
-z = np.dstack((data['z_com'].to_numpy(), data['z_o'].to_numpy()))
-ax.scatter(data['x_com'], data['y_com'], data['z_com'],
-           c=data['2'], cmap='RdYlGn_r', ec='k', s=40)
-for i in range(len(x[0])):
-    ax.plot(x[0][i], y[0][i], z[0][i], color='gray', lw=1)
+fig, axs = plt.subplots(1,3,figsize=(23,7),sharey=True)
+for exp, ax in zip(EXPERIMENTS, axs):
+    df1 = df[df['experiment'] == exp]
+
+    hue = df1['CHL amount, %'].astype(str) + ', ' + df1['component'].astype(str)
+    x = 'system'
+    y = 'α, °'
+
+    g = sns.violinplot(data=df1, x=x, y=y, hue=hue,
+                   cut=0, palette='RdYlGn_r', inner='quartile', ax=ax)
+    ax.set_title(exp)
+    if ax != axs[-1]:
+        g.legend_.remove()
+    if ax != axs[0]:
+        ax.set_ylabel('')
+
+plt.savefig(PATH / 'notebooks' / 'integral_parameters' / 'components' /
+             f'angle_components_{b_comp}-{e_comp}-{dt_comp}.png',
+            bbox_inches='tight')
+
+
+# %%
+hue = tips['sex'].astype(str) + ', ' + tips['smoker'].astype(str)
+sns.violinplot(x='day', y='total_bill', data=tips, hue=hue)
+
+# %%
+plot_violins(PATH / 'notebooks' / 'integral_parameters' / 'components' /
+             f'chl_tilt_comps_names_{b_comp}-{e_comp}-{dt_comp}.csv', 'α, °', EXPERIMENTS, TO_RUS, 'component')
 
 # %%
 
+df1 = df.groupby(['system', 'CHL amount, %', 'timepoint'],
+                 as_index=False).agg(
+    sum1=('1', 'sum'), count1=('1', 'count'),
+    sum2=('2', 'sum'), count2=('2', 'count'))
 
-df[(df['system'] == 'dmpc') & (df['CHL amount, %'] == 10)]
+df1['% of vertical component'] = df1['sum1'] / df1['count1'] * 100
+df1['% of horizontal component'] = df1['sum2'] / df1['count2'] * 100
+
+df1.to_csv(PATH / 'notebooks' / 'integral_parameters' /
+           f'angle_components_ratio_{comp_b}-{comp_e}-{comp_dt}.csv')
 
 
-# %%
-len(x_com)
+plot_violins(PATH / 'notebooks' / 'integral_parameters' /
+             f'angle_components_ratio_{comp_b}-{comp_e}-{comp_dt}.csv', '% of horizontal component',
+             EXPERIMENTS, TO_RUS)
 
-# %%
-for ts in u.trajectory:
-    ts.time
+plot_violins(PATH / 'notebooks' / 'integral_parameters' /
+             f'angle_components_ratio_{comp_b}-{comp_e}-{comp_dt}.csv', '% of vertical component',
+             EXPERIMENTS, TO_RUS)
 
-# %%
-df2 = pd.read_csv(PATH / 'notebooks' / 'integral_parameters' /
-                  f'chl_tilt_100-200-100_with_comps.csv')
+df2 = df1.groupby(['system', 'CHL amount, %'], as_index=False).agg(
+    vertical_mean=('% of vertical component', 'mean'), vertical_std=('% of vertical component', 'std'),
+    horizontal_mean=('% of horizontal component', 'mean'), horizontal_std=('% of horizontal component', 'std')
+)
 
-df2
-# %%
-len(df2[df2['1'] == 1])
-
-# %%
-len(df2[df2['2'] == 1])
-# %%
+df2.to_csv(PATH / 'notebooks' / 'integral_parameters' /
+           f'angle_components_ratio_{comp_b}-{comp_e}-{comp_dt}_mean_std.csv')
 
 # %%
 
 # %%
 
-# %%
 
 # %%
-
+# generate_coords_comps_table(trj_slices, comp_b, comp_e, comp_dt)
 # %%
 
-# %%
+if not (PATH / 'notebooks' / 'integral_parameters' /
+        f'chl_tilt_{trj_slices[0].b}-{trj_slices[0].e}-{trj_slices[0].dt}_coords_with_comps.csv'
+        ).is_file():
+    generate_coords_comps_table(trj_slices, comp_b, comp_e, comp_dt)
+
+df = pd.read_csv(PATH / 'notebooks' / 'integral_parameters' /
+                 f'chl_tilt_{trj_slices[0].b}-{trj_slices[0].e}-{trj_slices[0].dt}_coords_with_comps.csv'
+                 )
+
+print('averaging data...')
+averaged_df = df.groupby(
+    ['system', 'CHL amount, %', 'chl_index'], as_index=False).mean()
+
+c = 0
+for exp in chunker(trj_slices, 9):
+    fig, axs = plt.subplots(3, 3, figsize=(10, 12), sharex=True, sharey=True)
+    fig.suptitle(tuple(EXPERIMENTS.keys())[c])
+    print(f'plotting {tuple(EXPERIMENTS.keys())[c]}...')
+    for syst, ax_row in zip(chunker(exp, 3), axs):
+        for trj, ax in zip(syst, ax_row):
+            print(f'plotting {str(trj.system)}...')
+            data = df[(df['system'] == str(trj.system).rsplit('_chol', 1)[0]) &
+                      (df['CHL amount, %'] == int(str(trj.system).rsplit('_chol', 1)[1]))]
+            # z = np.dstack((data['z_com'].to_numpy(), data['z_o'].to_numpy()))
+            # alpha = np.dstack((np.abs(data['α, °']), np.abs(data['α, °'])))
+
+            comp1 = data[data['1'] == 1]
+            comp2 = data[data['2'] == 1]
+            sns.histplot(x=np.abs(comp1['z_com'] - comp1['zmem']),
+                         y=np.abs(comp1['α, °']),
+                         color='C0',
+                         stat='density',
+                         bins=30,
+                         ax=ax)
+
+            sns.histplot(x=np.abs(comp2['z_com'] - comp2['zmem']),
+                         y=np.abs(comp2['α, °']),
+                         color='C1',
+                         stat='density',
+                         bins=30,
+                         ax=ax)
+
+            # for i in range(len(z[0])):
+            #     ax.plot(z[0][i], alpha[0][i], color='gray', lw=1)
+            ax.set_title(trj.system)
+            if ax in axs[:, 0]:
+                ax.set_ylabel('α, °')
+            if ax in axs[-1, :]:
+                ax.set_xlabel('Distance to bilayer center, Å')
+
+    # cbar_ax = fig.add_axes([.92, 0.34, 0.01, 0.3])
+    # cbar = fig.colorbar(im, cax=cbar_ax, ticks=np.linspace(0, 1, 5))
+    # cbar.set_ticklabels((100 * np.linspace(0, 1, 5)).astype('int'))
+    # cbar.ax.get_yaxis().labelpad = 15
+    # cbar.ax.set_ylabel('% of horizontal component', rotation=270)
+    plt.savefig(PATH / 'notebooks' / 'chol_tilt' / 'components_2d_plots' /
+                f'tilt_angle_{tuple(EXPERIMENTS.keys())[c]}_{trj_slices[0].b}-{trj_slices[0].e}-{trj_slices[0].dt}.png',
+                bbox_inches='tight')
+    c += 1
+print('done.')
+
 
 # %%
+data = averaged_df[(averaged_df['system'] == str('popc_chol50').rsplit('_chol', 1)[0]) &
+                   (averaged_df['CHL amount, %'] == int(str('popc_chol50').rsplit('_chol', 1)[1]))]
+
+
+plt.hist(np.abs(data['z_com'] - data['zmem']), bins=20, ec='k', density=True)
 
 # %%
+trj = TrajectorySlice(System(PATH, 'popc_chol50'), 199, 200, 10)
+u = mda.Universe(f'{trj.system.dir}/md/md.tpr',
+                 f'{trj.system.dir}/md/pbcmol_{trj.b}-{trj.e}-{trj.dt}.xtc')
 
+u.dimensions
+
+# %%
+syst = 'dops_chol10'
 
 fig, ax = plt.subplots()
-lines = opener(f'{trj.system.path}/notebooks/chol_tilt/'
-               f'dmpc_chol10_100-200-100_tilt.xvg')
+lines = opener(PATH / 'notebooks' / 'chol_tilt' /
+               f'{syst}_100-200-100_tilt.xvg')
 
 a = list(map(float, flatten([i.split()[1:] for i in lines])))
 a = np.array([i if i <= 90 else i - 180 for i in a])
@@ -531,7 +593,7 @@ my_kde = sns.kdeplot(a,
 line = my_kde.lines[0]
 x, y = line.get_data()
 
-guess = [-30, 0.005, 20, -15, 0.02, 7, 15, 0.02, 7, 30, 0.005, 20]
+guess = [-20, 0.005, 10, -15, 0.02, 7, 10, 0.02, 7, 20, 0.005, 10]
 
 popt, _, _, _, _ = curve_fit(func, x, y, p0=guess, full_output=True)
 df = pd.DataFrame(popt.reshape(int(len(guess) / 3), 3),
@@ -555,6 +617,103 @@ ax.plot(x, func(x, *popt[3:6]), '--')
 ax.plot(x, func(x, *popt[6:9]), '--')
 ax.plot(x, func(x, *popt[9:]), '--')
 
+# %%
+
+
+def break_tilt_into_components(ax, trj: TrajectorySlice) -> None:
+    '''
+    break and plot tilt components for one trj slice
+    '''
+    lines = opener(f'{trj.system.path}/notebooks/chol_tilt/'
+                   f'{trj.system.name}_{trj.b}-{trj.e}-{trj.dt}_tilt.xvg')
+
+    # a = np.array(
+    #     list(map(float, flatten([i.split()[1:] for i in lines])))) - 90
+
+    a = list(map(float, flatten([i.split()[1:] for i in lines])))
+    a = np.array([i if i <= 90 else i - 180 for i in a])
+
+    def func(x, *params):
+        y = np.zeros_like(x)
+        for i in range(0, len(params), 3):
+            ctr = params[i]
+            amp = params[i + 1]
+            wid = params[i + 2]
+            y = y + amp * np.exp(-((x - ctr) / wid)**2)
+        return y
+
+    x = np.arange(np.min(a), np.max(a),
+                  (np.max(a) - np.min(a)) / 500)
+    my_kde = sns.kdeplot(a,
+                         ax=ax,
+                         # fill=False,
+                         lw=0,
+                         color='black',
+                         # element='poly',
+                         # stat='density',
+                         bw_adjust=0.4,
+                         cut=0
+                         )
+    line = my_kde.lines[0]
+    x, y = line.get_data()
+
+    guess = [-20, 0.005, 10, -15, 0.02, 7, 10, 0.02, 7, 20, 0.005, 10]
+    try:
+        popt, _, _, _, _ = curve_fit(func, x, y, p0=guess, full_output=True)
+        df = pd.DataFrame(popt.reshape(int(len(guess) / 3), 3),
+                          columns=['ctr', 'amp', 'wid'])
+        df['area'] = df.apply(lambda row: integrate.quad(func, np.min(
+            x), np.max(x), args=(row['ctr'], row['amp'], row['wid']))[0], axis=1)
+
+        fit = func(x, *popt)
+
+        sns.histplot(a,
+                     # fill=False,
+                     ax=ax,
+                     lw=0,
+                     element='poly',
+                     stat='density',
+                     alpha=0.2,
+                     edgecolor='black'
+                     )
+
+        ax.plot(x, fit, '-k', lw=2)
+        ax.plot(x, func(x, *popt[:3]), '--')
+        ax.plot(x, func(x, *popt[3:6]), '--')
+        ax.plot(x, func(x, *popt[6:9]), '--')
+        ax.plot(x, func(x, *popt[9:]), '--')
+
+        df.to_csv(
+            f'{trj.system.path}/notebooks/chol_tilt/'
+            f'{trj.system.name}_{trj.b}-{trj.e}-{trj.dt}_4_comps.csv', index=False)
+
+    except RuntimeError as e:
+        print(f'couldn\'t curve_fit for {trj.system}: ', e)
+
+
+# %%
+trj = TrajectorySlice(System(PATH, 'dppc_325_chol50'), 100, 200, 100)
+
+fig, ax = plt.subplots(figsize=(7, 7))
+break_tilt_into_components(ax, trj)
+ax.set_xlabel('Tilt (degree)')
+ax.set_ylabel('Density')
+fig.patch.set_facecolor('white')
+plt.savefig(f'{PATH}/notebooks/chol_tilt/'
+            f'{trj.system}_{trj.b}-{trj.e}-{trj.dt}_4_comps.png',
+            bbox_inches='tight', facecolor=fig.get_facecolor())
+
+
+# %%
+
+#
+# ax.plot(x, y, '-k', lw=2)
+# ax.plot(x, func(x, *guess[:3]), '--')
+# ax.plot(x, func(x, *guess[3:6]), '--')
+# ax.plot(x, func(x, *guess[6:9]), '--')
+# ax.plot(x, func(x, *guess[9:]), '--')
+
+
 stats.kstest(y, func(x, *popt))
 
 
@@ -562,8 +721,9 @@ stats.kstest(y, func(x, *popt))
 
 
 fig, ax = plt.subplots()
-lines = opener(f'{trj.system.path}/notebooks/chol_tilt/'
+lines = opener(PATH / 'notebooks' / 'chol_tilt' /
                f'dmpc_chol10_100-200-100_tilt.xvg')
+
 
 a = list(map(float, flatten([i.split()[1:] for i in lines])))
 a = np.array([i if i <= 90 else i - 180 for i in a])
@@ -615,6 +775,7 @@ sns.histplot(a,
 ax.plot(x, fit, '-k', lw=2)
 ax.plot(x, func(x, *popt[:3]), '--')
 ax.plot(x, func(x, *popt[3:6]), '--')
+ax.set_xlabel('Tilt (degree)')
 # ax.plot(x, func(x, *popt[6:9]), '--')
 # ax.plot(x, func(x, *popt[9:]), '--')
 
@@ -653,3 +814,6 @@ ax[1].plot(N, np.gradient(BIC), '-bs')
 ax[1].set_xlabel('n. components')
 ax[1].set_ylabel('grad (BIC)')
 ax[1].set_title('Gradient of BIC for each n of components')
+
+
+# %%

@@ -8,6 +8,9 @@ from pathlib import PosixPath
 from datetime import datetime
 import numpy as np
 
+def print_1line(str_:str, line_length=30):
+    print(str_ + (line_length - len(str_))*' ', end='\r')
+    
 
 def opener(inp: PosixPath) -> list[str]:
     '''
@@ -16,6 +19,13 @@ def opener(inp: PosixPath) -> list[str]:
     with open(inp, 'r', encoding='utf-8') as f:
         lines = [i.strip() for i in f.read().strip().split('\n')]
     return lines
+
+
+def chunker(seq: list, size: int) -> list:
+    '''
+    returns sub-list of size "size"
+    '''
+    return (seq[pos:pos + size] for pos in range(0, len(seq), size))
 
 
 def multiproc(func: Callable, data: list, n_workers: int = 8) -> dict:
