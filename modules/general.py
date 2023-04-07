@@ -10,7 +10,7 @@ import numpy as np
 
 def print_1line(str_:str, line_length=30):
     print(str_ + (line_length - len(str_))*' ', end='\r')
-    
+
 
 def opener(inp: PosixPath) -> list[str]:
     '''
@@ -28,16 +28,16 @@ def chunker(seq: list, size: int) -> list:
     return (seq[pos:pos + size] for pos in range(0, len(seq), size))
 
 
-def multiproc(func: Callable, data: list, n_workers: int = 8) -> dict:
+def multiproc(func: Callable, *args, n_workers: int = 8) -> dict:
     '''
     wrapper for ProcessPoolExecutor,
-    gets function, list of arguments (single argument) and max n of workers,
-    gives dictionary {arguments: results}
+    gets function, values of arguments (as iterables) and max n of workers,
+    gives dictionary {tuple of arguments: result, ...}
     '''
     result = {}
 
     with ProcessPoolExecutor(max_workers=n_workers) as executor:
-        futures = {executor.submit(func, i): i for i in data}
+        futures = {executor.submit(func, *i): i for i in zip(*args)}
         for f in as_completed(futures.keys()):
             result[futures[f]] = f.result()
 

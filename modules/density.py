@@ -11,8 +11,9 @@ from scipy.interpolate import make_interp_spline
 import MDAnalysis as mda
 from MDAnalysis.selections.gromacs import SelectionWriter
 
-from .general import calc_1d_com
-from .traj import System, TrajectorySlice
+from modules.general import calc_1d_com
+from modules.traj import System, TrajectorySlice
+
 
 def get_densities(trj: TrajectorySlice) -> None:
     '''
@@ -155,7 +156,7 @@ def plot_density_profile(ax: axes._subplots.Axes,
 
 
 def calculate_distances_between_density_groups(
-        grp1: str, grp2: str, trj: TrajectorySlice) -> list[float]:
+        trj: TrajectorySlice, grp1: str, grp2: str) -> list[float]:
     '''
     calculates distances between density groups in each step of trajectory part
     using densities of corresponding groups
@@ -187,7 +188,7 @@ def calculate_distances_between_density_groups(
     return distances
 
 
-def calculate_density_peak_widths(grp: str, trj: TrajectorySlice) -> list[float]:
+def calculate_density_peak_widths(trj: TrajectorySlice, grp: str) -> list[float]:
     '''
     peak width of density is calculated by
     obtaining x value of yCOM

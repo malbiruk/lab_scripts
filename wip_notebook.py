@@ -103,8 +103,6 @@ sns.set(style='ticks', context='talk', palette='muted')
 # %%
 palette = sns.color_palette('RdYlGn_r',4)
 
-
-# %%
 for exp in EXPERIMENTS:
     fig, axs = plt.subplots(1, 3, figsize=(
         24, 7), sharex=True, sharey=True)

@@ -1,6 +1,7 @@
 '''
-Script to obtain chl angle components and draw CHL angle component+density plots.
-CHL ids and angle component are connected here.
+Script to obtain chl angle components and draw CHL angle component+density plots, as well as
+CHL angle component plots in 2d and 3d.
+CHL ids and angle components are connected here.
 '''
 
 import argparse
@@ -18,8 +19,9 @@ from modules.general import (
     flatten, opener, sparkles, duration, chunker, print_1line, get_keys_by_value)
 from modules.traj import System, TrajectorySlice
 from modules.density import plot_density_profile
+from modules.angles import chl_tilt_angle
 from modules.constants import PATH, TO_RUS, EXPERIMENTS
-from integral_parameters_script import chl_tilt_angle, plot_violins
+from integral_parameters_script import plot_violins
 
 
 def plot_comps_angle_vals(csv: Path, b_comp: int, e_comp: int, dt_comp: int):
@@ -550,7 +552,7 @@ def generate_coords_comps_table(trj_slices: list[TrajectorySlice],
         infile=PATH / 'notebooks' / 'integral_parameters' /
         f'chl_tilt_{trj_slices[0].b}-{trj_slices[0].e}-'
         f'{trj_slices[0].dt}_coords_with_comps.csv',
-        outfile=PATH / 'notebooks' / 'integral_parameters' /
+        outfile=PATH / 'notebooks' / 'integral_parameters' / 'components' /
         f'chl_tilt_{trj_slices[0].b}-{trj_slices[0].e}-'
         f'{trj_slices[0].dt}_no_and_both_comps.csv')
     get_n_of_chl_in_monolayers(
@@ -793,7 +795,7 @@ def main():
         chl_tilt_trj_slices = [TrajectorySlice(
             System(PATH, s), chl_tilt_b, chl_tilt_e, chl_tilt_dt) for s in systems]
 
-        chl_tilt_angle(chl_tilt_trj_slices, EXPERIMENTS, TO_RUS)
+        chl_tilt_angle(chl_tilt_trj_slices)
         path_to_df = (PATH / 'notebooks' /
                       'integral_parameters' /
                       f'chl_tilt_{chl_tilt_b}-{chl_tilt_e}-{chl_tilt_dt}.csv')
