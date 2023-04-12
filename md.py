@@ -12,25 +12,7 @@ import argparse
 import shutil
 import re
 import subprocess
-
-
-def realtime_output(cmd: str):
-    '''
-    a wrapper for shell commands which outputs all shell output to shell instantly
-    '''
-    with subprocess.Popen(
-        cmd,
-        shell=True,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.STDOUT,
-        universal_newlines=True
-    ) as process:
-        while True:
-            output = process.stdout.readline()
-            if output == '' and process.poll() is not None:
-                break
-            if output:
-                print(output.strip(), flush=True)
+from modules.general import realtime_output
 
 
 def gmx_version():

@@ -2,14 +2,35 @@
 general functions which are often used
 '''
 
+import subprocess
 from concurrent.futures import ProcessPoolExecutor, as_completed
 from typing import Callable
 from pathlib import PosixPath
 from datetime import datetime
 import numpy as np
 
-def print_1line(str_:str, line_length=30):
-    print(str_ + (line_length - len(str_))*' ', end='\r')
+
+def print_1line(str_: str, line_length=30):
+    print(str_ + (line_length - len(str_)) * ' ', end='\r')
+
+
+def realtime_output(cmd: str):
+    '''
+    a wrapper for shell commands which outputs all shell output to shell instantly
+    '''
+    with subprocess.Popen(
+        cmd,
+        shell=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        universal_newlines=True
+    ) as process:
+        while True:
+            output = process.stdout.readline()
+            if output == '' and process.poll() is not None:
+                break
+            if output:
+                print(output.strip(), flush=True)
 
 
 def opener(inp: PosixPath) -> list[str]:
@@ -56,7 +77,7 @@ def get_keys_by_value(val, dict) -> tuple:
     get keys of dict (as tuple) by value
     '''
     res = []
-    for k,v in dict.items():
+    for k, v in dict.items():
         if val in v:
             res.append(k)
     return tuple(res)
