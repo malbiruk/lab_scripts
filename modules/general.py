@@ -33,7 +33,7 @@ def realtime_output(cmd: str):
                 print(output.strip(), flush=True)
 
 
-def opener(inp: PosixPath) -> list[str]:
+def opener(inp: PosixPath) -> list:
     '''
     open text file as list of lines
     '''
