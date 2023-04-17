@@ -217,7 +217,6 @@ def main():
     parser.add_argument('--mdrun_args', nargs='*',
                         help='in relaxation and md steps run mdrun with following '
                         'parameters (format: parameter1=value1 parameter2=value2)')
-    # TODO: add argument to store mdrun arguments
 
     args = parser.parse_args()
 

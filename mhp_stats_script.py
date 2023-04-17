@@ -734,7 +734,7 @@ def main():
 
     args = parser.parse_args()
 
-    sns.set(style='ticks', context='talk', palette='bright')
+    sns.set(style='ticks', context='talk', palette='muted')
     chol_impact = Path('/home/klim/Documents/chol_impact')
     systems_list = sorted([
         '20x20_dmpc',

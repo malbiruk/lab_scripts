@@ -39,7 +39,7 @@ def hb_lifetime(tau_max: int = 20, step: int = 10):
         tau_max += step
         return hb_lifetime(tau_max, step)
 
-        
+
 def obtain_hbonds_data(syst: str):
     '''
     calculate hbonds using MDAnalysis
@@ -85,6 +85,3 @@ import nglview
 # %%
 chols = u.select_atoms('resname CHL')
 v = nglview.show_mdanalysis(chols)
-
-# %%
-v
