@@ -81,7 +81,7 @@ def run_scd_py(trj: TrajectorySlice) -> None:
     '''
     if not Path(f'{trj.system.path}/notebooks/scd/'
                 f'{trj.system.name}_{trj.b}-{trj.e}-{trj.dt}_scd.csv').is_file():
-        cmd = ['/nfs/belka2/soft/impulse/dev/inst/scd.py',
+        cmd = ['/nfs/belka2/soft/impulse/dev/init/scd.py',
                f'-f {trj.system.dir}/md/pbcmol.xtc',
                f'-s {trj.system.dir}/md/md.tpr',
                f'-o {trj.system.path}/notebooks/scd/{trj.system.name}_{trj.b}-{trj.e}-{trj.dt}',
@@ -573,7 +573,6 @@ def parse_args():
                         '"thickness" -- bilayer thickness,\n'
                         '"arperlip" -- area per lipid,\n'
                         '"scd" -- acyl chains order parameter,\n'
-                        '"chl_tilt_angle" -- angle between CHL c3-c17 vector and bilayer plane,\n'
                         '"chl_p_distance" -- distances between CHL COM/O and phosphates.'
                         )
     parser.add_argument('--plot',

@@ -85,3 +85,30 @@ import nglview
 # %%
 chols = u.select_atoms('resname CHL')
 v = nglview.show_mdanalysis(chols)
+
+
+
+# %% last ns trajectories
+import numpy as np
+from modules.general import flatten
+from modules.constants import PATH, EXPERIMENTS
+
+systems = list(set(flatten([(i, i + '_chol10', i + '_chol30', i + '_chol50')
+                        for i in flatten(EXPERIMENTS.values())])))
+len(systems)
+# %%
+ok_systems = []
+for syst in systems:
+    data = np.load(PATH / syst / 'mhp' / '1_data.nmp')['data']
+    if np.max(data) < 100:
+        ok_systems.append(syst)
+len(ok_systems)
+
+# %%
+data = np.load(PATH / 'dopc' / 'mhp' / '1_data.nmp')['data']
+np.any(np.unique(data)) > 100
+len(np.unique(data))
+
+
+# %%
+set(systems) - set(ok_systems)

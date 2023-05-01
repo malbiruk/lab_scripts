@@ -7,21 +7,21 @@ CHL ids and angle components are connected here.
 import argparse
 import sys
 from pathlib import Path
+
+import matplotlib.pyplot as plt
+import MDAnalysis as mda
 import numpy as np
 import pandas as pd
-import MDAnalysis as mda
-from MDAnalysis.analysis import leaflet
-import matplotlib.pyplot as plt
 import seaborn as sns
-
-from modules import ndtest
-from modules.general import (
-    flatten, opener, sparkles, duration, chunker, print_1line, get_keys_by_value)
-from modules.traj import System, TrajectorySlice
-from modules.density import plot_density_profile
-from modules.angles import chl_tilt_angle
-from modules.constants import PATH, TO_RUS, EXPERIMENTS
 from integral_parameters_script import plot_violins
+from MDAnalysis.analysis import leaflet
+from modules import ndtest
+from modules.angles import chl_tilt_angle
+from modules.constants import EXPERIMENTS, PATH
+from modules.density import plot_density_profile
+from modules.general import (chunker, duration, flatten, get_keys_by_value,
+                             opener, print_1line, sparkles)
+from modules.traj import System, TrajectorySlice
 
 
 def plot_comps_angle_vals(csv: Path, b_comp: int, e_comp: int, dt_comp: int):
@@ -77,12 +77,10 @@ def plot_comps_ratios(b_comp: int, e_comp: int, dt_comp: int):
                f'angle_components_ratio_{b_comp}-{e_comp}-{dt_comp}.csv', index=False)
     plot_violins(
         PATH / 'notebooks' / 'integral_parameters' / 'components' /
-        f'angle_components_ratio_{b_comp}-{e_comp}-{dt_comp}.csv', '% of horizontal component',
-        EXPERIMENTS, TO_RUS)
+        f'angle_components_ratio_{b_comp}-{e_comp}-{dt_comp}.csv', '% of horizontal component')
     plot_violins(
         PATH / 'notebooks' / 'integral_parameters' / 'components' /
-        f'angle_components_ratio_{b_comp}-{e_comp}-{dt_comp}.csv', '% of vertical component',
-        EXPERIMENTS, TO_RUS)
+        f'angle_components_ratio_{b_comp}-{e_comp}-{dt_comp}.csv', '% of vertical component')
     df2 = df1.groupby(
         ['system', 'CHL amount, %'], as_index=False).agg(
         vertical_mean=('% of vertical component', 'mean'),
@@ -123,9 +121,7 @@ def add_comps_to_chl_tilt(path_to_df, b, e, dt,
                               f'chl_tilt_{b_comp}-{e_comp}-{dt_comp}_with_comps.csv',
                               b_comp, e_comp, dt_comp)
         print('poltting components ratio...')
-        plot_comps_ratios(PATH / 'notebooks' / 'integral_parameters' /
-                          f'chl_tilt_{b_comp}-{e_comp}-{dt_comp}_with_comps.csv',
-                          b_comp, e_comp, dt_comp)
+        plot_comps_ratios(b_comp, e_comp, dt_comp)
     print('done.')
 
 
@@ -465,6 +461,10 @@ def generate_coords_comps_table(trj_slices: list[TrajectorySlice],
                      f'chl_tilt_{trj_slices[0].b}-{trj_slices[0].e}-{trj_slices[0].dt}.csv')
     df = df.drop_duplicates(ignore_index=True)
 
+    system = []
+    timepoint = []
+    chl_amount = []
+    chl_index = []
     x_com = []
     y_com = []
     z_com = []
@@ -507,7 +507,11 @@ def generate_coords_comps_table(trj_slices: list[TrajectorySlice],
             o3_positions = {c: i.atoms.select_atoms("name O3").positions[0]
                             for c, i in enumerate(chols.residues)}
 
-            for mol in chols_coms:
+            for c, mol in enumerate(chols_coms):
+                system.append(trj.system.name.split('_chol', 1)[0])
+                timepoint.append(int(ts.time))
+                chl_amount.append(int(trj.system.name.split('_chol', 1)[1]))
+                chl_index.append(c)
                 x_com.append(chols_coms[mol][0])
                 y_com.append(chols_coms[mol][1])
                 z_com.append(chols_coms[mol][2])
@@ -527,17 +531,37 @@ def generate_coords_comps_table(trj_slices: list[TrajectorySlice],
 
     print('assigning lists...')
 
-    df['x_com'] = x_com
-    df['y_com'] = y_com
-    df['z_com'] = z_com
-    df['x_o'] = x_o
-    df['y_o'] = y_o
-    df['z_o'] = z_o
-    df['monolayer'] = monolayer
-    df['zmem'] = zmem
-    df['x_box'] = x_box
-    df['y_box'] = y_box
-    df['z_box'] = z_box
+    coords_df = pd.DataFrame(
+        {'system': system,
+         'timepoint': timepoint,
+         'CHL amount, %': chl_amount,
+         'chl_index': chl_index,
+         'x_com': x_com,
+         'y_com': y_com,
+         'z_com': z_com,
+         'x_o': x_o,
+         'y_o': y_o,
+         'z_o': z_o,
+         'monolayer': monolayer,
+         'zmem': zmem,
+         'x_box': x_box,
+         'y_box': y_box,
+         'z_box': z_box},
+    )
+
+    coords_df.to_csv(PATH / 'notebooks' / 'integral_parameters' /
+                     f'coords_{trj_slices[0].b}-{trj_slices[0].e}-{trj_slices[0].dt}.csv',
+                     index=False)
+
+    outmerge = pd.merge(df, coords_df,
+                        on=['system', 'timepoint', 'chl_index', 'CHL amount, %'],
+                        indicator=True, how='outer')
+    outmerge.to_csv(
+        PATH / 'notebooks' / 'integral_parameters' /
+        f'chl_tilt_{trj_slices[0].b}-{trj_slices[0].e}-{trj_slices[0].dt}_coords_debug.csv',
+        index=False)
+
+    df = pd.merge(df, coords_df, on=['system', 'timepoint', 'chl_index', 'CHL amount, %'])
 
     df.to_csv(PATH / 'notebooks' / 'integral_parameters' /
                      f'chl_tilt_{trj_slices[0].b}-{trj_slices[0].e}-{trj_slices[0].dt}_coords.csv',
@@ -763,6 +787,9 @@ def main():
     parser.add_argument('--angle_components_2d',
                         action='store_true',
                         help='draw 2d (angle - Z) plots of distribution of components')
+    parser.add_argument('--generate_coords_comps_table',
+                        action='store_true',
+                        help='generate coords comps distr for timerange')
     parser.add_argument('-b', '--b', type=int, default=150,
                         help='beginning time in ns, default=150')
     parser.add_argument('-e', '--e', type=int, default=200,
@@ -815,6 +842,9 @@ def main():
         angle_components_2d(trj_slices, chl_tilt_b, chl_tilt_e, chl_tilt_dt)
         angle_components_2d_hists(
             trj_slices, chl_tilt_b, chl_tilt_e, chl_tilt_dt)
+
+    if args.generate_coords_comps_table:
+        generate_coords_comps_table(trj_slices, chl_tilt_b, chl_tilt_e, chl_tilt_dt)
 
 
 if __name__ == '__main__':

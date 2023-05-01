@@ -32,7 +32,7 @@ def get_chl_tilt(trj: TrajectorySlice) -> None:
     else:
         print('obtaining 💁 system 🏙️ information...')
         u = mda.Universe(f'{trj.system.dir}/md/md.tpr',
-                         f'{trj.system.dir}/md/md.gro',
+                         f'{trj.system.dir}/md/pbcmol.xtc',
                          refresh_offsets=True)
         chols = u.residues[u.residues.resnames == 'CHL'].atoms
         n_chol = len(u.residues[u.residues.resnames == 'CHL'])
@@ -48,7 +48,7 @@ def get_chl_tilt(trj: TrajectorySlice) -> None:
 
         print('calculating 👨‍💻 cholesterol 🫀 tilt 📐 ...')
 
-        cmd = ['source `ls -t /usr/local/gromacs*/bin/GMXRC | head -n 1 ` && ',
+        cmd = ['source /usr/local/gromacs-2021.5/bin/GMXRC && ',
                f'echo 0 1 | gmx bundle -s {trj.system.dir}/md/md.tpr',
                f'-f {trj.system.dir}/md/pbcmol.xtc',
                f'-na {n_chol} -z -n {trj.system.dir}/ch3_ch17.ndx',
@@ -150,7 +150,7 @@ def chl_tilt_summary(trj_slices: list[TrajectorySlice]) -> None:
         records.append((trj.system.name, timepoints, chl_indices, a))
     df = pd.DataFrame.from_records(
         records, columns=['system', 'timepoint', 'chl_index', 'α, °'])
-    df.sort_values('system', inplace=True, ignore_index=True)
+    # df.sort_values('system', inplace=True, ignore_index=True)
     df['CHL amount, %'] = df['system'].str.split('_chol', n=1, expand=True)[1]
     df['system'] = df['system'].str.split('_chol', n=1, expand=True)[0]
     df.replace(to_replace=[None], value=0, inplace=True)
@@ -167,8 +167,10 @@ def chl_tilt_angle(trj_slices: list[TrajectorySlice], no_comps=False) -> None:
     trj_slices = [s for s in trj_slices if 'chol' in s.system.name]
     path, b, e, dt = trj_slices[0].system.path, trj_slices[0].b, trj_slices[0].e, trj_slices[0].dt
     print('obtaining cholesterol tilt...')
-    with ProcessPoolExecutor(max_workers=8) as executor:
-        executor.map(get_chl_tilt, trj_slices)
+    # with ProcessPoolExecutor(max_workers=8) as executor:
+    #     executor.map(get_chl_tilt, trj_slices)
+    for trj in trj_slices:
+        get_chl_tilt(trj)
     print('saving chl tilt angles...')
     df = chl_tilt_summary(trj_slices)
     df.to_csv(

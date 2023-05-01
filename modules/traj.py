@@ -83,7 +83,7 @@ class TrajectorySlice:
             #           f'pbcmol_{self.b}-{self.e}-{self.dt}.xtc') +
             #       ' already exists')
         # else:
-            cmd = ['source `ls -t /usr/local/gromacs*/bin/GMXRC | head -n 1 ` && ',
+            cmd = ['source /usr/local/gromacs-2021.5/bin/GMXRC && ',
                    f'echo 0 | gmx trjconv -s {self.system.dir}/md/md.tpr',
                    f'-f {self.system.dir}/md/pbcmol.xtc',
                    f'-b {self.b * 1000} -e {self.e * 1000} -dt {self.dt}',

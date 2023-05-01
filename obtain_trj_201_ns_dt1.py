@@ -3,16 +3,17 @@ This script generates new trajectories with length 1 ns and dt=1 ps
 (from 199 ns to 200) of all systems specified in EXPERIMENTS
 '''
 
-import os
-import sys
 import argparse
-import requests
-from pathlib import Path
+import os
+import subprocess
+import sys
+from datetime import timedelta as td
 
-from modules.general import flatten, duration, multiproc
-from modules.constants import PATH, EXPERIMENTS
 from modules import tg_bot
-from modules.tg_bot import run_or_send_error
+from modules.constants import EXPERIMENTS, PATH
+from modules.general import duration, flatten, multiproc, progress_bar
+from modules.tg_bot import run_or_send_error, send_message
+from rich.traceback import install
 
 
 def create_mdp_for_last_ns(syst: str):
@@ -20,18 +21,19 @@ def create_mdp_for_last_ns(syst: str):
     creates mdp file neccesarry to create simulation of last ns
     '''
     with open(PATH / syst / 'md.mdp', encoding='utf-8') as inp, \
-            open(PATH / syst / 'md_last_ns.mdp', 'w', encoding='utf-8') as out:
+            open(PATH / syst / 'md_201_ns.mdp', 'w', encoding='utf-8') as out:
         for c, line in enumerate(inp):
             if c == 0:
                 line = 'include=-I/home/krylov/Progs/IBX/AMMP/src/data_copy/libs '\
                     '-I/home/krylov/Progs/IBX/AMMP/src/data_copy/libs/forcefields/AA '\
                     '-I/home/krylov/Progs/IBX/AMMP/src/data_copy/libs/forcefields/AA/amber14sb.ff '\
-                    '-I/home/krylov/Progs/IBX/AMMP/src/data_copy/libs/lipids/top/AA/amber14sb.ff-lip\n'
+                    '-I/home/krylov/Progs/IBX/AMMP/src/data_copy/libs/lipids/top/AA/'\
+                    'amber14sb.ff-lip\n'
             replacement_dict = {
-                'nsteps': ('100000000', '500000'),
-                'tinit': ('0', '190000'),
+                'nsteps': ('100000000', '100500000'),
+                # 'tinit': ('0', '200001'),
                 'nstxtcout': ('5000', '500')}
-                # 'constraints': ('all-bonds', 'h-bonds')}
+            # 'constraints': ('all-bonds', 'h-bonds')}
 
             for linestart, (replace_from, replace_to) in replacement_dict.items():
                 if line.startswith(linestart):
@@ -44,25 +46,6 @@ def create_mdp_for_last_ns(syst: str):
             out.write(line)
 
 
-def obtain_part_of_trr(syst: str, b: int, e: int, dt: int) -> bool:
-    '''
-    generates part of trajectory in .trr format
-
-    b -- start frame
-    e -- end frame
-    dt -- delta t between each frames (in ps)
-    '''
-    md_dir = str(PATH / syst / 'md')
-    cmd = ['. /usr/local/gromacs-2020.4/bin/GMXRC && ',
-           f'echo 0 | gmx trjconv -s {md_dir}/md.tpr',
-           f'-f {md_dir}/md.trr',
-           f'-b {b} -e {e} -dt {dt}',
-           f'-o {md_dir}/md_{b}.trr',
-           '-vel -force']
-    msg = f'Couldn\'t obtain part (b={b}, e={e}, dt={dt}) of {syst} trajectory'
-    return run_or_send_error(' '.join(cmd), msg)
-
-
 def create_last_ns_tpr(syst: str) -> bool:
     '''
     creates tpr file neccesarry to create simulation of last ns
@@ -70,23 +53,22 @@ def create_last_ns_tpr(syst: str) -> bool:
     '''
     tg_bot.send_message(f'generating .tpr for `{syst}`...')
 
-    if (PATH / syst / 'md' / ' last_ns.tpr').is_file():
+    if (PATH / syst / 'md' / ' 201_ns.tpr').is_file():
         return True
 
-    if not (PATH / syst / 'md' / ' md_199000.trr').is_file():
-        trr_success = obtain_part_of_trr(syst, 199000, 199000, 0)
-        if not trr_success:
-            return False
+    # if not (PATH / syst / 'md' / ' md_199000.trr').is_file():
+    #     trr_success = obtain_part_of_trr(syst, 199000, 199000, 0)
+    #     if not trr_success:
+    #         return False
 
-    cmd = ['. /usr/local/gromacs-2020.4/bin/GMXRC && ',
-           f'gmx grompp -f {str(PATH / syst)}/md_last_ns.mdp',
-           f'-c {str(PATH / syst)}/pr4/pr4.gro',
-           f'-r {str(PATH / syst)}/pr4/pr4.gro',
+    cmd = ['. /usr/local/gromacs-2021.5/bin/GMXRC && ',
+           f'gmx grompp -f {str(PATH / syst)}/md_201_ns.mdp',
+           f'-c {str(PATH / syst)}/md/md.gro',
            f'-p {str(PATH / syst)}/indata/system.top',
            f'-n {str(PATH / syst)}/indata/grps.ndx',
-           f'-t {str(PATH / syst)}/md/md_199000.trr',
+           f'-t {str(PATH / syst)}/md/md.cpt',
            # f'-e {str(PATH / syst)}/md/md.edr',
-           f'-o {str(PATH / syst)}/md/last_ns.tpr -v']
+           f'-o {str(PATH / syst)}/md/201_ns.tpr -v']
 
     msg = f'Couldn\'t create tpr file for system {syst}'
     return run_or_send_error(' '.join(cmd), msg)
@@ -98,8 +80,8 @@ def run_md_last_ns(syst: str) -> bool:
     '''
     tg_bot.send_message(f'simulating 1 ns trajectory for `{syst}`...')
     os.chdir(PATH / syst / 'md')
-    cmd = ['. /usr/local/gromacs-2020.4/bin/GMXRC && ',
-           'gmx mdrun -deffnm last_ns -v']
+    cmd = ['. /usr/local/gromacs-2021.5/bin/GMXRC && ',
+           'gmx mdrun -s 201_ns.tpr -cpi md.cpt -noappend -v']
     msg = f'{syst} last ns md failed'
     return run_or_send_error(' '.join(cmd), msg)
 
@@ -111,48 +93,25 @@ def reformat_trajectory(syst: str) -> bool:
     3. trjcat trajectories from 1 and 2 to get new pbcmol.xtc
     4. rename pbcmol
     '''
-    tg_bot.send_message(f'reformatting trajectory `{syst}`...')
+    # tg_bot.send_message(f'reformatting trajectory `{syst}`...')
     os.chdir(PATH / syst / 'md')
-    msg = f'{syst} trajectory reformatting failed'
-    # cmd = ['. /usr/local/gromacs-2020.4/bin/GMXRC &&',
-    #        'echo 0 | gmx trjconv -s md.tpr -f md.xtc ',
-    #        '-dt 10 -o pbcmol.xtc']
-    # if not run_or_send_error(' '.join(cmd), msg):
-    #     return False
-
-    if not (PATH / syst / 'md' / 'pbcmol_0-199000-10.xtc').is_file():
-        cmd = ['. /usr/local/gromacs-2020.4/bin/GMXRC &&',
-               'echo 0 | gmx trjconv -s md.tpr -f pbcmol.xtc ',
-               '-b 0 -e 199000 -dt 10 -o pbcmol_0-199000-10.xtc']
-        if not run_or_send_error(' '.join(cmd), msg):
-            return False
-
-    # (PATH / syst / 'md' / 'pbcmol.xtc').rename(
-    #     PATH / syst / 'md' / 'pbcmol_prev.xtc')
-
-    # if not ((PATH / syst / 'md' / 'pbcmol_199000-200000-1.xtc').is_file()
-    #         or (PATH / syst / 'md' / 'pbcmol_199000-200000-1.xtc').stat().st_size > 0):
-    if not (PATH / syst / 'md' / 'last_ns.tpr').is_file():
-        cmd = ['. /usr/local/gromacs-2020.4/bin/GMXRC &&',
-               'echo 0 | gmx trjconv -s md.tpr -f last_ns.xtc',
-               '-pbc mol -t0 199000 -o pbcmol_199000-200000-1.xtc']
-    else:
-        cmd = ['. /usr/local/gromacs-2020.4/bin/GMXRC &&',
-               'echo 0 | gmx trjconv -s last_ns.tpr -f last_ns.xtc',
-               '-pbc mol -t0 199000 -o pbcmol_199000-200000-1.xtc']
-        if not run_or_send_error(' '.join(cmd), msg):
-            return False
-
-    cmd = ['. /usr/local/gromacs-2020.4/bin/GMXRC &&'
-           'gmx trjcat -f pbcmol_0-199000-10.xtc pbcmol_199000-200000-1.xtc',
-           '-o pbcmol_new.xtc']
-
-    # i don't know why but error in trjcat raises RequestException in tg_bot.send_message()
+    if (PATH / syst / 'md' / 'pbcmol_201.xtc').is_file():
+        return True
+    ls = os.listdir()
     try:
-        return run_or_send_error(' '.join(cmd), msg)
-    except requests.exceptions.RequestException:
-        tg_bot.send_message(f'error combining trajectories for `{syst}`')
+        traj = sorted([i for i in ls if i.startswith('traj_comp')])[-1]
+    except IndexError:
+        send_message(f'couldn\'t reformat trajectory for {s}, no traj file')
+
+    msg = f'{syst} trajectory reformatting failed'
+    cmd = ['. /usr/local/gromacs-2021.5/bin/GMXRC &&',
+           f'echo 0 | gmx trjconv -s 201_ns.tpr -f {traj}',
+           '-pbc mol -o pbcmol_201.xtc']
+
+    if not run_or_send_error(' '.join(cmd), msg,
+                             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL):
         return False
+    return True
 
 
 @ duration
@@ -170,12 +129,20 @@ def main():
     parser.add_argument('--reformat',
                         action='store_true',
                         help='insert calculated part into previously calculated trajectories')
+    parser.add_argument('--n_workers',
+                        type=int,
+                        default=8,
+                        help='n of subprocesses to run during multiprocessing, default=8')
     if len(sys.argv) < 2:
         parser.print_usage()
     args = parser.parse_args()
 
     systems = flatten([(i, i + '_chol10', i + '_chol30', i + '_chol50')
                        for i in flatten(EXPERIMENTS.values())])
+
+    systems = list(dict.fromkeys(systems))
+
+    systems = ['dopc_dops50']
 
     if args.calculate:
         tg_bot.send_message(
@@ -186,8 +153,6 @@ def main():
         for syst in systems:
             c += 1
             tg_bot.send_message(f'{c}/{len(systems)}')
-            # if (PATH / syst / 'md' / 'last_ns.xtc').is_file():
-            #     continue
             create_mdp_for_last_ns(syst)
             tpr_success = create_last_ns_tpr(syst)
             if tpr_success:
@@ -197,7 +162,7 @@ def main():
 
         systs_with_error_md = ', '.join(systs_with_error_md)
 
-        tg_bot.send_message(
+        send_message(
             'obtaining last ns trajectories from systems done.\n'
             f'systems with errors: `{systs_with_error_md}`'
         )
@@ -205,7 +170,9 @@ def main():
     if args.reformat:
         tg_bot.send_message(
             'reformatting last ns trajectories from systems started...')
-        errors = multiproc(reformat_trajectory, systems, n_workers=13)
+        errors = multiproc(reformat_trajectory, systems,
+                           n_workers=args.n_workers, messages=True,
+                           descr='reformatting trajectories')
         print(errors)
         errors = ', '.join([k[0] for k, v in errors.items() if not v])
         tg_bot.send_message(
@@ -213,9 +180,10 @@ def main():
             f'systems with errors: `{errors}`'
         )
 
+        errors = ', '.join(errors)
+        send_message(f'systems with errors: `{errors}`')
+
 
 if __name__ == '__main__':
+    install()
     main()
-
-# %% md
-#  `dopc: last_ns.xtc is 0 bytes`

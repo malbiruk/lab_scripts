@@ -1,6 +1,14 @@
-import requests
-import traceback
+'''
+this module contains functions and constants to send messages via lab scripts telegram bot
+'''
+
+
 import subprocess
+import traceback
+
+import requests
+import rich
+from rich.markdown import Markdown
 
 TOKEN = '5961004234:AAGgpbuWwnSc382mXL14m97Glu96_z2nBng'
 SEND_URL = f'https://api.telegram.org/bot{TOKEN}/sendMessage'
@@ -17,16 +25,17 @@ def send_message(message: str, silent: bool = False):
     answer = requests.post(SEND_URL,
                            json={'chat_id': CHAT_ID,
                                  'text': message,
-                                 'parse_mode': 'Markdown'})
-    if answer.json()['ok'] == True:
+                                 'parse_mode': 'Markdown'},
+                           timeout=120)
+    if answer.json()['ok']:
         if not silent:
-            print(message)
+            rich.print(Markdown(message))
     else:
-        raise requests.exceptions.RequestException('message not sent.')
+        raise requests.exceptions.RequestException('message not sent.', answer.json())
     return answer.json()
 
 
-def run_or_send_error(cmd: str, msg: str) -> bool:
+def run_or_send_error(cmd: str, msg: str, **kwargs) -> bool:
     '''
     wrapper to run shell commands and send telegram message
     with stderr if error occures
@@ -35,12 +44,12 @@ def run_or_send_error(cmd: str, msg: str) -> bool:
     msg - message to send if error (will be bold and followed by stderr output)
     '''
     try:
-        subprocess.run(cmd, shell=True, check=True)
+        subprocess.run(cmd, shell=True, check=True, **kwargs)
         return True
     except subprocess.CalledProcessError as e:
-        res = subprocess.run(cmd, shell=True, capture_output=True)
+        res = subprocess.run(cmd, shell=True, check=False, capture_output=True)
         send_message('*' + msg + ':*\n`' +
                      res.stderr.decode("utf-8") + '`', silent=True)
-        print(e, '\n')
-        print(res.stderr.decode("utf-8"))
+        rich.print(e, '\n')
+        rich.print(res.stderr.decode("utf-8"))
         return False
