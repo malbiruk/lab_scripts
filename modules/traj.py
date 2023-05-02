@@ -14,6 +14,8 @@ class System:
     '''
     path: PosixPath  # directory containing system directory
     name: str
+    xtc: str = 'pbcmol.xtc' # name of trajectory file
+    tpr: str = 'md.tpr' # name of topology file
     dir: str = field(init=False)
 
     def __post_init__(self):
@@ -84,8 +86,8 @@ class TrajectorySlice:
             #       ' already exists')
         # else:
             cmd = ['source /usr/local/gromacs-2021.5/bin/GMXRC && ',
-                   f'echo 0 | gmx trjconv -s {self.system.dir}/md/md.tpr',
-                   f'-f {self.system.dir}/md/pbcmol.xtc',
+                   f'echo 0 | gmx trjconv -s {self.system.dir}/md/{self.system.tpr}',
+                   f'-f {self.system.dir}/md/{self.system.xtc}',
                    f'-b {self.b * 1000} -e {self.e * 1000} -dt {self.dt}',
                    f'-o {self.system.dir}/md/pbcmol_{self.b}-{self.e}-{self.dt}.xtc']
             os.popen(' '.join(cmd)).read()
