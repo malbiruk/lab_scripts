@@ -1,6 +1,5 @@
 #!/usr/bin/python3
 
-# pylint:disable=protected-access
 
 import argparse
 import logging

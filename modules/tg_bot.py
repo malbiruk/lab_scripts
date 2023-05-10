@@ -15,7 +15,7 @@ SEND_URL = f'https://api.telegram.org/bot{TOKEN}/sendMessage'
 CHAT_ID = '258382605'
 
 
-def send_message(message: str, silent: bool = False):
+def send_message(message: str, silent: bool = True):
     '''
     send telegram message from lab_scripts bot.
     ** -- bold text, __ -- italics

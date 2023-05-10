@@ -40,7 +40,7 @@ progress_bar = Progress(
     TextColumn('|'),
     TimeElapsedColumn(),
     TextColumn('|'),
-    TimeRemainingColumn(),
+    TimeRemainingColumn(), 
 )
 
 

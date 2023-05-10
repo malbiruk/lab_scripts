@@ -31,8 +31,8 @@ def get_chl_tilt(trj: TrajectorySlice) -> None:
         print('already calculated, skipping...')
     else:
         print('obtaining 💁 system 🏙️ information...')
-        u = mda.Universe(f'{trj.system.dir}/md/md.tpr',
-                         f'{trj.system.dir}/md/pbcmol.xtc',
+        u = mda.Universe(f'{trj.system.dir}/md/{trj.system.tpr}',
+                         f'{trj.system.dir}/md/{trj.system.xtc}',
                          refresh_offsets=True)
         chols = u.residues[u.residues.resnames == 'CHL'].atoms
         n_chol = len(u.residues[u.residues.resnames == 'CHL'])
@@ -49,8 +49,8 @@ def get_chl_tilt(trj: TrajectorySlice) -> None:
         print('calculating 👨‍💻 cholesterol 🫀 tilt 📐 ...')
 
         cmd = ['source /usr/local/gromacs-2021.5/bin/GMXRC && ',
-               f'echo 0 1 | gmx bundle -s {trj.system.dir}/md/md.tpr',
-               f'-f {trj.system.dir}/md/pbcmol.xtc',
+               f'echo 0 1 | gmx bundle -s {trj.system.dir}/md/{trj.system.tpr}',
+               f'-f {trj.system.dir}/md/{trj.system.xtc}',
                f'-na {n_chol} -z -n {trj.system.dir}/ch3_ch17.ndx',
                f'-b {trj.b*1000} -e {trj.e * 1000} -dt {trj.dt}',
                f'-ot {str(trj.system.path)}/notebooks/chol_tilt/'
