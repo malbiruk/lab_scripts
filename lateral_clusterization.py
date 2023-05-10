@@ -5,19 +5,22 @@ plot cluster sizes in each experiment depending on CHL amount
 
 import argparse
 import sys
-import MDAnalysis as mda
-from MDAnalysis.analysis import leaflet
+
 import matplotlib.pyplot as plt
-from scipy.spatial.distance import pdist, squareform
+import MDAnalysis as mda
 import numpy as np
 import pandas as pd
+import scikit_posthocs
 import seaborn as sns
-from sklearn.cluster import AgglomerativeClustering
-
 from chl_angle_components_density import generate_coords_comps_table
-from modules.general import flatten, duration, sparkles, print_1line
+from MDAnalysis.analysis import leaflet
+from modules.constants import EXPERIMENTS, PATH
+from modules.general import (duration, flatten, print_1line, progress_bar,
+                             sparkles)
 from modules.traj import System, TrajectorySlice
-from modules.constants import PATH, EXPERIMENTS
+from scipy import stats
+from scipy.spatial.distance import pdist, squareform
+from sklearn.cluster import AgglomerativeClustering
 
 
 def obtain_pl_coords(trj_slices: list) -> None:
@@ -181,7 +184,7 @@ def plot_cluster_sizes(trj_slices: list, mol: str, thresh=3, max_clsize=70) -> N
         cluster_size=('label', 'value_counts')).reset_index()
     palette = sns.color_palette('RdYlGn_r', 4)
     print('plotting...')
-    for exp in EXPERIMENTS:
+    for exp, _ in EXPERIMENTS.items():
         fig, axs = plt.subplots(1, 3, figsize=(
             24, 7), sharex=True, sharey=True)
         for syst, ax in zip(EXPERIMENTS[exp], axs):
@@ -240,7 +243,7 @@ def plot_cluster_sizes_with_components(trj_slices: list, mol: str, thresh=6, max
     palette = sns.color_palette('Paired')
 
     print('plotting...')
-    for exp in EXPERIMENTS:
+    for exp, _ in EXPERIMENTS.items():
         fig, axs = plt.subplots(1, 3, figsize=(
             24, 7), sharex=True, sharey=True)
         for syst, ax in zip(EXPERIMENTS[exp], axs):
@@ -299,6 +302,237 @@ def plot_cluster_sizes_with_components(trj_slices: list, mol: str, thresh=6, max
     print('done.')
 
 
+def upd_dict_with_stat_tests_res_by_chl(p, df2: pd.DataFrame, df_by_chl: dict,
+                                        mol: str, thresh: int) -> None:
+    '''
+    helper function to perform stat tests on clsizes different by chl amount
+    stats: kruskal _ posthoc Dunn with Holm p-adjust
+    '''
+    for syst in p.track(df2['system'].unique(), description='tests by chl amount'):
+        data = [df2[(df2['system'] == syst) & (df2['CHL amount, %'] == 10)]['cluster_size'],
+                df2[(df2['system'] == syst) & (df2['CHL amount, %'] == 30)]['cluster_size'],
+                df2[(df2['system'] == syst) & (df2['CHL amount, %'] == 50)]['cluster_size']]
+
+        kruskal_p = stats.kruskal(*data).pvalue
+        if kruskal_p < 0.01:
+            p_values = scikit_posthocs.posthoc_dunn(data, p_adjust='holm')
+        else:
+            p_values = pd.DataFrame({1: [1, kruskal_p, kruskal_p],
+                                     2: [kruskal_p, 1, kruskal_p],
+                                     3: [kruskal_p, kruskal_p, 1]})
+            p_values.index += 1
+
+        df_by_chl['lipid'].append(mol)
+        df_by_chl['threshold'].append(thresh)
+        df_by_chl['system'].append(syst)
+        df_by_chl['10 vs 30 % CHL'].append(p_values.loc[1, 2])
+        df_by_chl['30 vs 50 % CHL'].append(p_values.loc[2, 3])
+        df_by_chl['10 vs 50 % CHL'].append(p_values.loc[1, 3])
+
+
+def upd_dict_with_stat_tests_res_by_exp(p, df2: pd.DataFrame, df_by_exp: dict,
+                                        mol: str, thresh: int) -> None:
+    '''
+    helper function to perform stat tests on clsizes different by experiment
+    stats: kruskal _ posthoc Dunn with Holm p-adjust
+    '''
+    for exp in p.track(EXPERIMENTS, description='tests by experiment'):
+        for chl_amount in (0, 10, 30, 50):
+            systs = EXPERIMENTS[exp]
+            data = [df2[(df2['system'] == systs[0]) & (
+                df2['CHL amount, %'] == chl_amount)]['cluster_size'],
+                df2[(df2['system'] == systs[1]) & (
+                    df2['CHL amount, %'] == chl_amount)]['cluster_size'],
+                df2[(df2['system'] == systs[2]) & (
+                    df2['CHL amount, %'] == chl_amount)]['cluster_size']]
+
+            kruskal_p = stats.kruskal(*data).pvalue
+            if kruskal_p < 0.01:
+                p_values = scikit_posthocs.posthoc_dunn(data, p_adjust='holm')
+            else:
+                p_values = pd.DataFrame({1: [1, kruskal_p, kruskal_p],
+                                         2: [kruskal_p, 1, kruskal_p],
+                                         3: [kruskal_p, kruskal_p, 1]})
+                p_values.index += 1
+
+            df_by_exp['lipid'].append(mol)
+            df_by_exp['threshold'].append(thresh)
+            df_by_exp['CHL amount, %'].append(chl_amount)
+            df_by_exp['experiment'].append(exp)
+            df_by_exp['1 vs 2'].append(p_values.loc[1, 2])
+            df_by_exp['2 vs 3'].append(p_values.loc[2, 3])
+            df_by_exp['1 vs 3'].append(p_values.loc[1, 3])
+    p.remove_task(p.tasks[-2].id)
+    p.remove_task(p.tasks[-1].id)
+
+
+def perform_stat_tests_by_chl_by_exp(trj_slices: list) -> None:
+    '''
+    perform Kruskal-Wallis test followed by post-hoc Dunn test with Holm p-adjust
+    on cluster sizes of CHL and PL for thresholds 3, 5, 7
+
+    for all systems: are cluster sizes different with changing CHL amount?
+    for each experiment: are cluster sizes different depending on experiment
+    (chain length, saturation etc.)?
+    '''
+    df_by_chl = {
+        'lipid': [],
+        'threshold': [],
+        'system': [],
+        '10 vs 30 % CHL': [],
+        '30 vs 50 % CHL': [],
+        '10 vs 50 % CHL': [],
+    }
+
+    df_by_exp = {
+        'lipid': [],
+        'threshold': [],
+        'CHL amount, %': [],
+        'experiment': [],
+        '1 vs 2': [],
+        '2 vs 3': [],
+        '1 vs 3': [],
+    }
+
+    with progress_bar as p:
+        for mol in p.track(('CHL', 'PL'), description='mol'):
+            for thresh in p.track((3, 5, 7), description='threshold'):
+                all_counts = pd.read_csv(PATH / 'notebooks' / 'gclust' /
+                                         f'{mol}_clusters_{trj_slices[0].b}-{trj_slices[0].e}-'
+                                         f'{trj_slices[0].dt}_thresh_{thresh}.csv')
+                if mol == 'CHL':
+                    all_counts['component'] = all_counts.apply(
+                        lambda x: 'vertical'
+                        if x['1'] == 1
+                        else ('horizontal' if x['2'] == 1 else np.nan), axis=1)
+                    df2 = all_counts.groupby(
+                        ['timepoint', 'system', 'CHL amount, %', 'monolayer', 'component']).agg(
+                        cluster_size=('label', 'value_counts')).reset_index()
+                else:
+                    df2 = all_counts.groupby(
+                        ['timepoint', 'system', 'CHL amount, %', 'monolayer']).agg(
+                        cluster_size=('label', 'value_counts')).reset_index()
+
+                upd_dict_with_stat_tests_res_by_chl(p, df2, df_by_chl, mol, thresh)
+                upd_dict_with_stat_tests_res_by_exp(p, df2, df_by_exp, mol, thresh)
+            p.remove_task(p.tasks[-1].id)
+
+    by_chl = pd.DataFrame(df_by_chl)
+    by_exp = pd.DataFrame(df_by_exp)
+
+    by_chl.to_csv(PATH / 'notebooks' / 'gclust' / 'stats' /
+                  f'cl_sizes_by_chl_amount_{trj_slices[0].b}-{trj_slices[0].e}-'
+                  f'{trj_slices[0].dt}.csv', index=False)
+    by_exp.to_csv(PATH / 'notebooks' / 'gclust' / 'stats' /
+                  f'cl_sizes_by_exp_{trj_slices[0].b}-{trj_slices[0].e}-'
+                  f'{trj_slices[0].dt}.csv', index=False)
+
+
+def perform_stat_tests_by_comp(trj_slices: list) -> None:
+    '''
+    for each threshold (3, 5, 7)
+    for each system and each chl amount (10, 30, 50)
+    perform Mann-Whitneyu U-test comapring cluster sizes of CHL consisting of
+    vertical or horizontal components (of CHL tilt angle)
+    '''
+
+    mw_comps_dict = {
+        'threshold': [],
+        'system': [],
+        'CHL amount, %': [],
+        'statistic': [],
+        'p-value': []
+    }
+    mol = 'CHL'
+
+    with progress_bar as p:
+        for thresh in p.track((3, 5, 7), description='threshold'):
+            all_counts = pd.read_csv(PATH / 'notebooks' / 'gclust' /
+                                     f'{mol}_clusters_{trj_slices[0].b}-{trj_slices[0].e}-'
+                                     f'{trj_slices[0].dt}_thresh_{thresh}.csv')
+            all_counts['component'] = all_counts.apply(
+                lambda x: 'vertical'
+                if x['1'] == 1
+                else ('horizontal' if x['2'] == 1 else np.nan), axis=1)
+            df2 = all_counts.groupby(
+                ['timepoint', 'system', 'CHL amount, %', 'monolayer', 'component']).agg(
+                cluster_size=('label', 'value_counts')).reset_index()
+            for syst in p.track(df2['system'].unique(), description='performing MW test'):
+                for chl_amount in (10, 30, 50):
+                    hor = df2[(df2['system'] == syst) & (df2['CHL amount, %'] == chl_amount) &
+                              (df2['component'] == 'horizontal')]['cluster_size']
+                    ver = df2[(df2['system'] == syst) & (df2['CHL amount, %'] == chl_amount) &
+                              (df2['component'] == 'vertical')]['cluster_size']
+
+                    stat, pval = stats.mannwhitneyu(hor, ver)
+                    mw_comps_dict['threshold'].append(thresh)
+                    mw_comps_dict['system'].append(syst)
+                    mw_comps_dict['CHL amount, %'].append(chl_amount)
+                    mw_comps_dict['statistic'].append(stat)
+                    mw_comps_dict['p-value'].append(pval)
+            p.remove_task(p.tasks[-1].id)
+
+    mv_comps = pd.DataFrame(mw_comps_dict)
+    mv_comps.to_csv(PATH / 'notebooks' / 'gclust' / 'stats' /
+                    f'cl_sizes_by_comp_{trj_slices[0].b}-{trj_slices[0].e}-'
+                    f'{trj_slices[0].dt}.csv', index=False)
+
+
+def get_clsizes_mean_std(trj_slices: list, components: bool = False) -> None:
+    '''
+    get mean cluster size and std of cluster sizes for each system
+    '''
+    if components:
+        df = pd.DataFrame({'lipid': [], 'threshold': [], 'system': [],
+                           'CHL amount, %': [], 'component': [], 'mean_clsize': [],
+                           'std_clsize': []})
+    else:
+        df = pd.DataFrame({'lipid': [], 'threshold': [], 'system': [],
+                           'CHL amount, %': [], 'mean_clsize': [], 'std_clsize': []})
+
+    mols = ('CHL', 'PL') if not components else ('CHL',)
+
+    with progress_bar as p:
+        for mol in p.track(mols, description='lipid'):
+            for thresh in p.track((3, 5, 7), description='threshold'):
+                all_counts = pd.read_csv(PATH / 'notebooks' / 'gclust' /
+                                         f'{mol}_clusters_{trj_slices[0].b}-{trj_slices[0].e}-'
+                                         f'{trj_slices[0].dt}_thresh_{thresh}.csv')
+                if mol == 'CHL' or components:
+                    all_counts['component'] = all_counts.apply(
+                        lambda x: 'vertical'
+                        if x['1'] == 1
+                        else ('horizontal' if x['2'] == 1 else np.nan), axis=1)
+                    df2 = all_counts.groupby(
+                        ['timepoint', 'system', 'CHL amount, %', 'monolayer', 'component']).agg(
+                        cluster_size=('label', 'value_counts')).reset_index()
+                else:
+                    df2 = all_counts.groupby(
+                        ['timepoint', 'system', 'CHL amount, %', 'monolayer']).agg(
+                        cluster_size=('label', 'value_counts')).reset_index()
+
+                groupby = (['system', 'CHL amount, %', 'component']
+                           if components else ['system', 'CHL amount, %'])
+                mean_std_df = df2.groupby(groupby).agg(
+                    mean_clsize=('cluster_size', 'mean'),
+                    std_clsize=('cluster_size', 'std')
+                ).reset_index()
+
+                mean_std_df.insert(0, 'threshold', [thresh for _ in range(len(mean_std_df))])
+                mean_std_df.insert(0, 'lipid', [mol for _ in range(len(mean_std_df))])
+                df = pd.concat((df, mean_std_df))
+            p.remove_task(p.tasks[-1].id)
+
+    if components:
+        df.to_csv(PATH / 'notebooks' / 'gclust' / 'stats' /
+                  f'cl_sizes_components_mean_std_{trj_slices[0].b}-{trj_slices[0].e}-'
+                  f'{trj_slices[0].dt}.csv', index=False)
+    else:
+        df.to_csv(PATH / 'notebooks' / 'gclust' / 'stats' /
+                  f'cl_sizes_mean_std_{trj_slices[0].b}-{trj_slices[0].e}-'
+                  f'{trj_slices[0].dt}.csv', index=False)
+
+
 @ sparkles
 @ duration
 def main():
@@ -318,6 +552,9 @@ def main():
     parser.add_argument('--plot_cluster_sizes',
                         action='store_true',
                         help='plot sizes of clusters')
+    parser.add_argument('--stats',
+                        action='store_true',
+                        help='dump tables with stat tests')
     parser.add_argument('-mol', '--molecule', type=str, default='CHL',
                         help='molecules to clusterize, may be "CHL" or "PL", default="CHL"')
     parser.add_argument('-cls', '--max_clsize', type=int, default=40,
@@ -370,6 +607,13 @@ def main():
         plot_cluster_sizes(trj_slices, args.molecule,
                            args.thresh, args.max_clsize)
 
+    if args.stats:
+        # perform_stat_tests_by_chl_by_exp(trj_slices)
+        # perform_stat_tests_by_comp(trj_slices)
+        get_clsizes_mean_std(trj_slices)
+        get_clsizes_mean_std(trj_slices, components=True)
 
+
+# %%
 if __name__ == '__main__':
     main()
