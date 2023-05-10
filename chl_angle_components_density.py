@@ -482,7 +482,7 @@ def generate_coords_comps_table(trj_slices: list[TrajectorySlice],
     for trj in list(dict.fromkeys(trj_slices)):
         print(trj)
         trj.generate_slice_with_gmx()
-        u = mda.Universe(f'{trj.system.dir}/md/md.tpr',
+        u = mda.Universe(f'{trj.system.dir}/md/{trj.system.tpr}',
                          f'{trj.system.dir}/md/pbcmol_{trj.b}-{trj.e}-{trj.dt}.xtc')
 
         for ts in u.trajectory:
@@ -796,6 +796,11 @@ def main():
                         help='ending time in ns, default=200')
     parser.add_argument('-dt', '--dt', type=int, default=1000,
                         help='dt in ps (default=1000)')
+    parser.add_argument('-xtc', '--xtc', type=str, default='pbcmol.xtc',
+                        help='name of trajectory files (default=pbcmol.xtc)')
+    parser.add_argument('-tpr', '--tpr', type=str, default='md.tpr',
+                        help='name of topology files (default=md.tpr)')
+
     parser.add_argument('--chl_tilt_b_e_dt',
                         nargs='+',
                         default='100 200 100',
@@ -813,7 +818,7 @@ def main():
                        for i in flatten(EXPERIMENTS.values())])
 
     trj_slices = [TrajectorySlice(
-        System(PATH, s), args.b, args.e, args.dt) for s in systems]
+        System(PATH, s, args.xtc, args.tpr), args.b, args.e, args.dt) for s in systems]
 
     chl_tilt_b, chl_tilt_e, chl_tilt_dt = [
         int(i) for i in args.chl_tilt_b_e_dt.split()]
