@@ -20,7 +20,7 @@ app = typer.Typer(rich_markup_mode='rich', add_completion=False)
 
 
 def calculate_contacts(trj: TrajectorySlice, grp1: str, grp2: str, contact_type: str,
-                       per_atom: int = 1) -> None:
+                       per_atom: int = 1) -> bool:
     '''
     wrapper for impulse to calculate specified contacts
 
@@ -71,38 +71,16 @@ OUT="{grp1}_{grp2_name + contact_type}"'''
 
 @duration
 @app.command()
-def get(
+def get(ctx: typer.Context,
     contact_types: Tuple[bool, bool, bool, bool] = typer.Option(
         (True, True, True, True),
         help='tasks to run [dim](pick from [bold]hb_lip, hb_sol, dc_lip, dc_sol[/])[/]'),
-    trj: str = typer.Option(
-        'pbcmol_201.xtc', '-trj', help='name of trajectory files',
-        rich_help_panel='Trajectory parameters'),
-    tpr: str = typer.Option(
-        '201_ns.tpr', '-tpr', help='name of topology files',
-        rich_help_panel='Trajectory parameters'),
-    b: int = typer.Option(
-        200, '-b', help='beginning of trajectories (in ns)',
-        rich_help_panel='Trajectory parameters'),
-    e: int = typer.Option(
-        201, '-e', help='end of trajectories (in ns)',
-        rich_help_panel='Trajectory parameters'),
-    dt: int = typer.Option(
-        1, '-dt', help='timestep of trajectories (in ps)',
-        rich_help_panel='Trajectory parameters'),
-    n_workers: int = typer.Option(
-        8, help='n of processes to start for each task',
-        rich_help_panel='Script config'),
-    verbose: bool = typer.Option(
-        False, '--verbose', '-v', help='print debug log',
-        rich_help_panel='Script config'),
-    messages: bool = typer.Option(
-        True, help='send updates info in telegram',
-        rich_help_panel='Script config'),
 ):
     '''
     run [bold]impulse cont_stat[/] on all systems to obtain contacts info
     '''
+    trj, tpr, b, e, dt, n_workers, verbose, messages = ctx.obj
+
     initialize_logging('get_contacts.log', verbose)
     systems = flatten([(i, i + '_chol10', i + '_chol30', i + '_chol50')
                        for i in flatten(EXPERIMENTS.values())])
@@ -176,6 +154,35 @@ def get(
         logging.info('contacts with water calculation done')
         logging.info('')
     logging.info('done.')
+
+@app.callback()
+def callback(ctx: typer.Context,
+           trj: str = typer.Option(
+               'pbcmol_201.xtc', '-trj', help='name of trajectory files',
+               rich_help_panel='Trajectory parameters'),
+           tpr: str = typer.Option(
+               '201_ns.tpr', '-tpr', help='name of topology files',
+               rich_help_panel='Trajectory parameters'),
+           b: float = typer.Option(
+               200, '-b', help='beginning of trajectories (in ns)',
+               rich_help_panel='Trajectory parameters'),
+           e: float = typer.Option(
+               201, '-e', help='end of trajectories (in ns)',
+               rich_help_panel='Trajectory parameters'),
+           dt: int = typer.Option(
+               1, '-dt', help='timestep of trajectories (in ps)',
+               rich_help_panel='Trajectory parameters'),
+           n_workers: int = typer.Option(
+               8, help='n of processes to start for each task',
+               rich_help_panel='Script config'),
+           verbose: bool = typer.Option(
+               False, '--verbose', '-v', help='print debug log',
+               rich_help_panel='Script config'),
+           messages: bool = typer.Option(
+               True, help='send updates info in telegram',
+               rich_help_panel='Script config')):
+    '''set of utilities to obtain and plot contacts data'''
+    ctx.obj = (trj, tpr, b, e, dt, n_workers, verbose, messages) # store command arguments
 
 
 if __name__ == '__main__':
