@@ -345,7 +345,7 @@ def upd_dict_with_stat_tests_res_by_chl(p, df2: pd.DataFrame, df_by_chl: dict,
         for row in stat_res.index:
             for col in stat_res.columns:
                 if col in ('sample size', 'power',
-                           'stat mean', 'dtat std'):
+                           'stat mean', 'stat std'):
                     continue
                 splitted_row = row.split(' vs ', 1)
                 row_in_dict = (mapping[splitted_row[0]]

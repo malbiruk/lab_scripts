@@ -41,7 +41,7 @@ def get_optimal_sample_size(*data: list,
     1. Determine the effect size (e.g., using d_r).
     2. Choose the significance level (alpha).
     3. Simulate the alternative hypothesis by adding the effect size
-       to the control group.
+       to the control group (h0).
     4. Sample the simulated groups with a sample size of sample_size
        and perform the specified statistical test.
     5. Calculate the statistical power of the test (i.e., the proportion
@@ -52,6 +52,7 @@ def get_optimal_sample_size(*data: list,
 
     returns tuple of sample size, power and effect sizes between groups
     '''
+    max_sample_size = min((len(i) for i in data))
 
     # simulate groups
     h0 = data[0]
@@ -82,7 +83,7 @@ def get_optimal_sample_size(*data: list,
         sample_size += round(
             sample_size * desired_power / power) - sample_size
 
-        if sample_size > len(h0) or sample_size < sample_size_min:
+        if sample_size > max_sample_size or sample_size < sample_size_min:
             break
 
         if sample_size == prev_sample_size:
@@ -99,8 +100,8 @@ def get_optimal_sample_size(*data: list,
                        'Sample size may not be optimized')
             break
 
-    if sample_size > len(h0):
-        sample_size = len(h0)
+    if sample_size > max_sample_size:
+        sample_size = max_sample_size
         power = sum((stat_test(
             *[i.sample(sample_size)
               for i in simulated_groups]).pvalue < alpha
@@ -139,15 +140,18 @@ def get_stat_test_results(
                 effect_size_estimator=effect_size_estimator,
                 sample_size_min=sample_size_min, **kwargs)
 
-            stat_res = [stat_test(*[i.sample(optimal_size, replace=True)
+            stat_res = [stat_test(*[i.sample(optimal_size)
                                     for i in data]) for _ in range(n_tests)]
 
             rich.print(f'optimal size: {optimal_size}\tpower: {power}\n')
             success = True
-        except ValueError:
-            rich.print('[red]no unique values during test![/] '
-                       f'minimal sample size: {sample_size_min}')
-            sample_size_min += size_step
+        except ValueError as e:
+            if str(e).startswith('All numbers are identical'):
+                rich.print('[red]no unique values during test![/]\t'
+                           f'minimal sample size: {sample_size_min}')
+                sample_size_min += size_step
+            else:
+                raise ValueError(e) from e
 
     return optimal_size, power, effect_sizes, stat_res
 
@@ -198,7 +202,7 @@ def stat_test_with_big_sample_size(*data: list,
     if need_posthoc:
         if mean_p < alpha:
             posthoc_pvals = [posthoc_test(
-                [i.sample(optimal_size, replace=True) for i in data],
+                [i.sample(optimal_size) for i in data],
                 p_adjust=p_adjust)
                 for _ in range(n_posthoc_tests)]
             pval_means = pd.concat(posthoc_pvals).groupby(level=0).mean()
