@@ -2,6 +2,7 @@
 this module includes functions related to stat analyses
 '''
 
+from collections import namedtuple
 from typing import Callable, List, Tuple
 
 import numpy as np
@@ -96,8 +97,8 @@ def get_optimal_sample_size(*data: list,
         rich.print(f'sample size: {sample_size}\tpower: {power}\tstep: {step}')
 
         if step == max_step:
-            rich.print('Warning: max_step reached. '
-                       'Sample size may not be optimized')
+            rich.print('[bold red]Warning: max_step reached. '
+                       'Sample size may not be optimized[/]')
             break
 
     if sample_size > max_sample_size:
@@ -166,7 +167,8 @@ def stat_test_with_big_sample_size(*data: list,
                                    n_tests: int = 1000,
                                    n_posthoc_tests: int = 100,
                                    effect_size_estimator: Callable = calc_dr,
-                                   **kwargs) -> pd.DataFrame:
+                                   **kwargs
+                                   ) -> namedtuple:
     '''
     get optimal sample size using subsampling
     then perform stat_test n_tests times.
@@ -181,6 +183,11 @@ def stat_test_with_big_sample_size(*data: list,
     returns df with mean and std of p-values, sample_size, power, effect_size
 
     **kwargs will go to get_optimal_sample_size function
+
+    returns namedtuple:
+        'res' - pd.Dataframe with results,
+        'stat_distr - statistic distribution
+        'pvalue_distr' - p-value distribution of stat_test
     '''
 
     optimal_size, power, effect_sizes, stat_res = get_stat_test_results(
@@ -192,12 +199,12 @@ def stat_test_with_big_sample_size(*data: list,
         n_tests=n_tests,
         **kwargs)
 
-    pvals = [i.pvalue for i in stat_res]
-    stat_vals = [i.statistic for i in stat_res]
-    mean_stat = np.mean(stat_vals)
-    std_stat = np.std(stat_vals)
-    mean_p = np.mean(pvals)
-    std_p = np.std(pvals)
+    stat_vals = np.array([i.statistic for i in stat_res])
+    pvals = np.array([i.pvalue for i in stat_res])
+    mean_stat, std_stat = np.mean(stat_vals), np.std(stat_vals)
+    mean_p, std_p = np.mean(pvals), np.std(pvals)
+
+    Result = namedtuple('Result', ['res', 'stat_distr', 'pvalue_distr'])
 
     if need_posthoc:
         if mean_p < alpha:
@@ -244,13 +251,35 @@ def stat_test_with_big_sample_size(*data: list,
                         effect_size_estimator(data[i - 1], data[j - 1]))
                 index.append(f'{i} vs {j}')
 
-        return pd.DataFrame(df_dict, index)
+        return Result(pd.DataFrame(df_dict, index), stat_vals, pvals)
 
     # return single row df if not need_posthoc
-    return pd.DataFrame({'stat mean': [mean_stat],
-                         'stat std': [std_stat],
-                         'p-value mean': [mean_p],
-                         'p-value std': [std_p],
-                         'sample size': [optimal_size],
-                         'power': [power],
-                         'effect size': [effect_sizes[0]]})
+    return Result(pd.DataFrame({'stat mean': [mean_stat],
+                                'stat std': [std_stat],
+                                'p-value mean': [mean_p],
+                                'p-value std': [std_p],
+                                'sample size': [optimal_size],
+                                'power': [power],
+                                'effect size': [effect_sizes[0]]}),
+                  stat_vals, pvals)
+
+
+def bootstrap(data: pd.Series,
+              statistic: Callable,
+              n_resamples: int = 9999,
+              confidence_level: float = .95) -> namedtuple:
+    '''
+    compute a two-sided bootstrap confidence interval of a statistic
+    returns confidence_interval;
+    use attributes low, high
+    '''
+    bs_replicates = [statistic(data.sample(len(data), replace=True))
+                     for _ in range(n_resamples)]
+    ConfidenceInterval = namedtuple('ConfidenceInterval',
+                                    ['low', 'high'])
+
+    percentile_low = (1 - confidence_level) / 2 * 100
+    percentile_high = 100 - percentile_low
+
+    return ConfidenceInterval(*np.percentile(
+        bs_replicates, [percentile_low, percentile_high]))

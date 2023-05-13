@@ -17,7 +17,7 @@ from MDAnalysis.analysis import leaflet
 from modules.constants import EXPERIMENTS, PATH
 from modules.general import (duration, flatten, print_1line, progress_bar,
                              sparkles)
-from modules.my_stats import stat_test_with_big_sample_size
+from modules.my_stats import bootstrap, stat_test_with_big_sample_size
 from modules.traj import System, TrajectorySlice
 from scipy import stats
 from scipy.spatial.distance import pdist, squareform
@@ -244,10 +244,11 @@ def plot_cluster_sizes_with_components(trj_slices: list, mol: str,
 
     rich.print('counting cluster sizes...')
 
-    all_counts['component'] = all_counts.apply(
-        lambda x: 'vertical'
-        if x['1'] == 1
-        else ('horizontal' if x['2'] == 1 else np.nan), axis=1)
+    all_counts['component'] = np.where(
+        all_counts['1'] == 1,
+        'vertical',
+        np.where(all_counts['2'] == 1,
+                 'horizontal', np.nan))
 
     df2 = all_counts.groupby(
         ['timepoint', 'system', 'CHL amount, %', 'monolayer', 'component']).agg(
@@ -324,7 +325,7 @@ def upd_dict_with_stat_tests_res_by_chl(p, df2: pd.DataFrame, df_by_chl: dict,
                 df2[(df2['system'] == syst)
                     & (df2['CHL amount, %'] == 50)]['cluster_size']]
 
-        stat_res = stat_test_with_big_sample_size(*data)
+        stat_res = stat_test_with_big_sample_size(*data).res
 
         df_by_chl['lipid'].append(mol)
         df_by_chl['threshold'].append(thresh)
@@ -373,7 +374,7 @@ def upd_dict_with_stat_tests_res_by_exp(p, df2: pd.DataFrame, df_by_exp: dict,
                 df2[(df2['system'] == systs[2]) & (
                     df2['CHL amount, %'] == chl_amount)]['cluster_size']]
 
-            stat_res = stat_test_with_big_sample_size(*data)
+            stat_res = stat_test_with_big_sample_size(*data).res
 
             df_by_exp['lipid'].append(mol)
             df_by_exp['threshold'].append(thresh)
@@ -463,10 +464,11 @@ def perform_stat_tests_by_chl_by_exp(trj_slices: list) -> None:
                     f'{trj_slices[0].dt}_thresh_{thresh}.csv')
 
                 if mol == 'CHL':
-                    all_counts['component'] = all_counts.apply(
-                        lambda x: 'vertical'
-                        if x['1'] == 1
-                        else ('horizontal' if x['2'] == 1 else np.nan), axis=1)
+                    all_counts['component'] = np.where(
+                        all_counts['1'] == 1,
+                        'vertical',
+                        np.where(all_counts['2'] == 1,
+                                 'horizontal', np.nan))
                     df2 = all_counts.groupby(
                         ['timepoint', 'system', 'CHL amount, %',
                          'monolayer', 'component']).agg(
@@ -523,10 +525,11 @@ def perform_stat_tests_by_comp(trj_slices: list) -> None:
                                      f'{mol}_clusters_{trj_slices[0].b}-'
                                      f'{trj_slices[0].e}-'
                                      f'{trj_slices[0].dt}_thresh_{thresh}.csv')
-            all_counts['component'] = all_counts.apply(
-                lambda x: 'vertical'
-                if x['1'] == 1
-                else ('horizontal' if x['2'] == 1 else np.nan), axis=1)
+            all_counts['component'] = np.where(
+                all_counts['1'] == 1,
+                'vertical',
+                np.where(all_counts['2'] == 1,
+                         'horizontal', np.nan))
             df2 = all_counts.groupby(
                 ['timepoint', 'system', 'CHL amount, %',
                  'monolayer', 'component']).agg(
@@ -550,7 +553,7 @@ def perform_stat_tests_by_comp(trj_slices: list) -> None:
                     stats_res = stat_test_with_big_sample_size(
                         hor, ver,
                         stat_test=stats.mannwhitneyu,
-                        need_posthoc=False)
+                        need_posthoc=False).res
 
                     for col in stats_res.columns:
                         mw_comps_dict[col].append(stats_res.loc[0, col])
@@ -567,44 +570,39 @@ def get_clsizes_mean_std(trj_slices: list, components: bool = False) -> None:
     '''
     get mean cluster size and std of cluster sizes for each system
     '''
-    if components:
-        df = pd.DataFrame({'lipid': [], 'threshold': [], 'system': [],
-                           'CHL amount, %': [], 'component': [],
-                          'count_clsize': [],
-                           'mean_clsize': [], 'std_clsize': [],
-                           'median_clsize': [], 'q25_clsize': [],
-                           'q75_clsize': []})
-    else:
-        df = pd.DataFrame({'lipid': [], 'threshold': [], 'system': [],
-                           'CHL amount, %': [], 'count_clsize': [],
-                          'mean_clsize': [], 'std_clsize': [],
-                           'median_clsize': [], 'q25_clsize': [],
-                           'q75_clsize': []})
+    mols = ['CHL', 'PL'] if not components else ['CHL']
 
-    mols = ('CHL', 'PL') if not components else ('CHL',)
+    dfs = []
 
     with progress_bar as p:
         for mol in p.track(mols, description='lipid'):
-            for thresh in p.track((3, 5, 7), description='threshold'):
+            for thresh in p.track([3, 5, 7], description='threshold'):
                 all_counts = pd.read_csv(
                     PATH / 'notebooks' / 'gclust' /
                     f'{mol}_clusters_'
                     f'{trj_slices[0].b}-{trj_slices[0].e}-'
                     f'{trj_slices[0].dt}_thresh_{thresh}.csv')
+
                 if mol == 'CHL' or components:
-                    all_counts['component'] = all_counts.apply(
-                        lambda x: 'vertical'
-                        if x['1'] == 1
-                        else ('horizontal' if x['2'] == 1 else np.nan), axis=1)
+                    all_counts['component'] = np.where(
+                        all_counts['1'] == 1,
+                        'vertical',
+                        np.where(all_counts['2'] == 1,
+                                 'horizontal', np.nan))
+                    groupby = ['timepoint', 'system',
+                               'CHL amount, %', 'monolayer', 'component']
+
                     df2 = all_counts.groupby(
                         ['timepoint', 'system',
                          'CHL amount, %', 'monolayer', 'component']).agg(
                         cluster_size=('label', 'value_counts')).reset_index()
                 else:
-                    df2 = all_counts.groupby(
-                        ['timepoint', 'system',
-                         'CHL amount, %', 'monolayer']).agg(
-                        cluster_size=('label', 'value_counts')).reset_index()
+                    groupby = ['timepoint', 'system',
+                               'CHL amount, %', 'monolayer']
+
+                df2 = (all_counts.groupby(groupby)['label']
+                                 .value_counts()
+                                 .reset_index(name='cluster_size'))
 
                 groupby = (['system', 'CHL amount, %', 'component']
                            if components else ['system', 'CHL amount, %'])
@@ -612,26 +610,45 @@ def get_clsizes_mean_std(trj_slices: list, components: bool = False) -> None:
                 mean_std_df = df2.groupby(groupby, as_index=False).agg(
                     {'cluster_size': ['count', 'mean', 'std', 'median',
                                       lambda x: np.quantile(x, .25),
-                                      lambda x: np.quantile(x, .75)]}
+                                      lambda x: np.quantile(x, .75),
+                                      lambda x: bootstrap(x, np.mean),
+                                      lambda x: bootstrap(x, np.median)]}
                 )
 
-                mean_std_df.columns = df.columns[2:]
+                mean_std_df.columns = groupby + [
+                    'count_clsize', 'mean_clsize', 'std_clsize',
+                    'median_clsize',
+                    'q25_clsize', 'q75_clsize', 'mean_ci_clsize',
+                    'median_ci_clsize']
 
-                mean_std_df.insert(0, 'threshold',
-                                   [thresh for _ in range(len(mean_std_df))])
-                mean_std_df.insert(0, 'lipid',
-                                   [mol for _ in range(len(mean_std_df))])
-                df = pd.concat((df, mean_std_df))
-            p.remove_task(p.tasks[-1].id)
+                for metric in ['mean', 'median']:
+                    for type_ in ['low', 'high']:
+                        mean_std_df[f'{metric}_ci_{type_}_clisize'] = [
+                        getattr(i, type_)
+                        for i in mean_std_df[f'{metric}_ci_size']]
 
-    if components:
-        df.to_csv(PATH / 'notebooks' / 'gclust' / 'stats' /
-                  f'cl_sizes_components_mean_std_{trj_slices[0].b}-'
-                  f'{trj_slices[0].e}-{trj_slices[0].dt}.csv', index=False)
-    else:
-        df.to_csv(PATH / 'notebooks' / 'gclust' / 'stats' /
-                  f'cl_sizes_mean_std_{trj_slices[0].b}-{trj_slices[0].e}-'
-                  f'{trj_slices[0].dt}.csv', index=False)
+                mean_std_df.drop(
+                    columns=['mean_ci_clsize', 'median_ci_clsize'],
+                    inplace=True)
+
+                mean_std_df.insert(0, 'threshold', thresh)
+                mean_std_df.insert(0, 'lipid', mol)
+                dfs.append(mean_std_df)
+
+        df = pd.concat(dfs, ignore_index=True)
+
+        if components:
+            filename = 'cl_sizes_components_mean_std_' \
+                f'{trj_slices[0].b}-' \
+                f'{trj_slices[0].e}-{trj_slices[0].dt}.csv'
+
+        else:
+            filename = 'cl_sizes_mean_std_' \
+                f'{trj_slices[0].b}-{trj_slices[0].e}-' \
+                f'{trj_slices[0].dt}.csv'
+
+        df.to_csv(PATH / 'notebooks' / 'gclust' / 'stats' / filename,
+                  index=False)
 
 
 @ sparkles
@@ -714,8 +731,9 @@ def main():
     if args.stats:
         perform_stat_tests_by_comp(trj_slices)
         perform_stat_tests_by_chl_by_exp(trj_slices)
-        # get_clsizes_mean_std(trj_slices)
-        # get_clsizes_mean_std(trj_slices, components=True)
+        get_clsizes_mean_std(trj_slices)
+        get_clsizes_mean_std(trj_slices, components=True)
+    rich.print('[green]done.[/]')
 
 
 # %%
