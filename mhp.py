@@ -12,6 +12,7 @@ from typing import Tuple
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
+import scikit_posthocs
 import seaborn as sns
 import typer
 from modules.constants import EXPERIMENTS, PATH
@@ -19,6 +20,7 @@ from modules.general import (flatten, initialize_logging, multiproc,
                              progress_bar)
 from modules.tg_bot import run_or_send_error
 from modules.traj import System, TrajectorySlice
+from scipy import stats
 
 app = typer.Typer(rich_markup_mode='rich', add_completion=False)
 
@@ -35,13 +37,15 @@ def obtain_mhpmap(trj: TrajectorySlice, force: bool = False) -> bool:
             'data for %s already calculated, skipping...', trj.system.name)
         return True
 
-    (PATH / trj.system.name / f'mhp_{trj.b}-{trj.e}-{trj.dt}').mkdir(parents=True, exist_ok=True)
+    (PATH / trj.system.name / f'mhp_{trj.b}-{trj.e}-{trj.dt}').mkdir(
+        parents=True, exist_ok=True)
     os.chdir(PATH / trj.system.name / f'mhp_{trj.b}-{trj.e}-{trj.dt}')
     tpr = str(PATH / trj.system.name / 'md' / trj.system.tpr)
     xtc = str(PATH / trj.system.name / 'md' / trj.system.xtc)
 
     args = f'TOP={str(tpr)}\nTRJ={str(xtc)}' \
-        f'\nBEG={int(trj.b*1000)}\nEND={int(trj.e*1000)}\nDT={trj.dt}\nNX=150\nNY=150' \
+        f'\nBEG={int(trj.b*1000)}\nEND={int(trj.e*1000)}\nDT={trj.dt}' \
+        '\nNX=150\nNY=150' \
         f'\nMAPVAL="M"\nMHPTBL="98"\nPRJ="P"\nUPLAYER=1\nMOL="lip///"' \
         '\nSURFSEL=$MOL\nPOTSEL=$MOL\nDUMPDATA=1\nNOIMG=1'
 
@@ -54,7 +58,8 @@ def obtain_mhpmap(trj: TrajectorySlice, force: bool = False) -> bool:
     cmd = f'{impulse} -f args -t {prj}'
     msg = f'couldn\'t obtain mhp data for `{trj.system.name}`'
 
-    if run_or_send_error(cmd, msg, stdout=subprocess.DEVNULL, stderr=subprocess.STDOUT):
+    if run_or_send_error(cmd, msg,
+                         stdout=subprocess.DEVNULL, stderr=subprocess.STDOUT):
         logging.info('sucessfully calculated mhp data for %s', trj.system.name)
         return True
 
@@ -77,7 +82,8 @@ def get(ctx: typer.Context,
     systems = flatten([(i, i + '_chol10', i + '_chol30', i + '_chol50')
                        for i in flatten(EXPERIMENTS.values())])
     systems = list(dict.fromkeys(systems))
-    trajectory_slices = [TrajectorySlice(System(PATH, s, xtc, tpr), b, e, dt) for s in systems]
+    trajectory_slices = [TrajectorySlice(System(PATH, s, xtc, tpr), b, e, dt)
+                         for s in systems]
 
     logging.info('started mhp data calculation')
     multiproc(obtain_mhpmap,
@@ -106,10 +112,12 @@ def calc_fractions_all(trj_slices: list) -> None:
     with progress_bar as p:
         for trj in p.track(trj_slices, description='collecting mhp data'):
             try:
-                data = np.load(PATH / trj.system.name /
-                               f'mhp_{trj.b}-{trj.e}-{trj.dt}' / '1_data.nmp')['data']
+                data = np.load(
+                    PATH / trj.system.name /
+                    f'mhp_{trj.b}-{trj.e}-{trj.dt}' / '1_data.nmp')['data']
             except FileNotFoundError:
-                logging.error('couldn\'t find 1_data.nmp file for %s', trj.system.name)
+                logging.error('couldn\'t find 1_data.nmp file for %s',
+                              trj.system.name)
                 continue
             for c, i in enumerate(data):
                 df_dict['index'].append(trj.system.name)
@@ -117,7 +125,8 @@ def calc_fractions_all(trj_slices: list) -> None:
                 if len(trj.system.name.split('_chol', 1)) == 1:
                     df_dict['CHL amount, %'].append(0)
                 else:
-                    df_dict['CHL amount, %'].append(trj.system.name.split('_chol', 1)[1])
+                    df_dict['CHL amount, %'].append(
+                        trj.system.name.split('_chol', 1)[1])
                 df_dict['timepoint'].append(trj.b + trj.dt * c)
                 i = i.flatten()
                 phob = i[i >= 0.5].shape[0]
@@ -126,39 +135,45 @@ def calc_fractions_all(trj_slices: list) -> None:
                 df_dict['phob'].append(phob / i.shape[0])
                 df_dict['phil'].append(phil / i.shape[0])
                 df_dict['neutr'].append(neutr / i.shape[0])
-            logging.info('succesfully calculated mhp fractions for %s', trj.system.name)
+            logging.info('succesfully calculated mhp fractions for %s',
+                         trj.system.name)
 
     df = pd.DataFrame(df_dict)
 
     df.to_csv(
         PATH / 'notebooks' / 'mhpmaps' /
-        f'for_hists_fractions_{trj_slices[0].b}-{trj_slices[0].e}-{trj_slices[0].dt}.csv',
+        'for_hists_fractions_'
+        f'{trj_slices[0].b}-{trj_slices[0].e}-{trj_slices[0].dt}.csv',
         index=False)
 
     df_stats = (
-        df.groupby(['index', 'system', 'CHL amount, %'], as_index=False).mean(numeric_only=True)
-        .assign(
-            phob_std=df.groupby(
-                ['index', 'system', 'CHL amount, %']).std(numeric_only=True)['phob'].values)
-        .assign(
-            phil_std=df.groupby(
-                ['index', 'system', 'CHL amount, %']).std(numeric_only=True)['phil'].values)
-        .assign(
-            neutr_std=df.groupby(
-                ['index', 'system', 'CHL amount, %']).std(numeric_only=True)['neutr'].values))
+        df.groupby(['index', 'system', 'CHL amount, %'], as_index=False)
+        .mean(numeric_only=True)
+        .assign(phob_std=df.groupby(
+            ['index', 'system', 'CHL amount, %'])
+            .std(numeric_only=True)['phob'].values)
+        .assign(phil_std=df.groupby(
+                ['index', 'system', 'CHL amount, %'])
+                .std(numeric_only=True)['phil'].values)
+        .assign(neutr_std=df.groupby(
+                ['index', 'system', 'CHL amount, %'])
+                .std(numeric_only=True)['neutr'].values))
 
     df_stats.to_csv(
         PATH / 'notebooks' / 'mhpmaps' /
-        f'for_hists_fractions_stats_{trj_slices[0].b}-{trj_slices[0].e}-{trj_slices[0].dt}.csv',
+        'for_hists_fractions_stats_'
+        f'{trj_slices[0].b}-{trj_slices[0].e}-{trj_slices[0].dt}.csv',
         index=False)
 
     logging.info('calculating mhp area fractions done')
 
 
 def draw_mhp_area_bars(ax: plt.axis, df: pd.DataFrame, systs: list,
-                       width: float, positions: tuple, alpha: float, label: str):
+                       width: float, positions: tuple,
+                       alpha: float, label: str):
     '''
-    create single bar plot for df with columns "phob_fr", "phob_std", "phil_fr"...
+    create single bar plot for df with columns
+    "phob_fr", "phob_std", "phil_fr"...
     '''
     if label is not None:
         labels = ['hydrophobic, ' + label,
@@ -180,14 +195,18 @@ def draw_mhp_area_bars(ax: plt.axis, df: pd.DataFrame, systs: list,
 
     # single black edges independent on alpha
     ax.bar(positions[0], df.loc[systs, :]['phob'], width,
-           yerr=df.loc[systs, :]['phob_std'], capsize=5, ec='k', fill=False, lw=2)
+           yerr=df.loc[systs, :]['phob_std'], capsize=5, ec='k',
+           fill=False, lw=2)
     ax.bar(positions[1], df.loc[systs, :]['neutr'], width,
-           yerr=df.loc[systs, :]['neutr_std'], capsize=5, ec='k', fill=False, lw=2)
+           yerr=df.loc[systs, :]['neutr_std'], capsize=5, ec='k',
+           fill=False, lw=2)
     ax.bar(positions[2], df.loc[systs, :]['phil'], width,
-           yerr=df.loc[systs, :]['phil_std'], capsize=5, ec='k', fill=False, lw=2)
+           yerr=df.loc[systs, :]['phil_std'], capsize=5, ec='k',
+           fill=False, lw=2)
 
 
-def plot_mhp_area_single_exp(ax: plt.axis, df: pd.DataFrame, exp: str, show_label: bool):
+def plot_mhp_area_single_exp(ax: plt.axis, df: pd.DataFrame, exp: str,
+                             show_label: bool):
     '''
     draw mhp area bars for single experiment
     '''
@@ -229,12 +248,13 @@ def plot_mhp_ratio_all(trj_slices):
     plot mhp fractions ratios for all systems
     '''
     logging.info('plotting area hists...')
-    df = pd.read_csv(PATH / 'notebooks' / 'mhpmaps' /
-                     'for_hists_fractions_stats_'
-                     f'{trj_slices[0].b}-{trj_slices[0].e}-{trj_slices[0].dt}.csv')
+    df = pd.read_csv(
+        PATH / 'notebooks' / 'mhpmaps' /
+        'for_hists_fractions_stats_'
+        f'{trj_slices[0].b}-{trj_slices[0].e}-{trj_slices[0].dt}.csv')
 
-    df[['phob', 'phil',	'neutr', 'phob_std', 'phil_std', 'neutr_std']] = (
-        df[['phob', 'phil',	'neutr', 'phob_std', 'phil_std', 'neutr_std']] * 100)
+    subdf = df[['phob', 'phil',	'neutr', 'phob_std', 'phil_std', 'neutr_std']]
+    subdf = subdf * 100
     df.set_index('index', inplace=True)
 
     fig, axs = plt.subplots(1, 3, figsize=(20, 7), sharey=True)
@@ -248,24 +268,137 @@ def plot_mhp_ratio_all(trj_slices):
     fig.legend(loc='upper center', bbox_to_anchor=(0.5, -0.1), ncol=4)
 
     plt.savefig(PATH / 'notebooks' / 'mhpmaps' / 'imgs' /
-                f'mhp_hists_area_dt{trj_slices[0].dt}.png', bbox_inches='tight', dpi=300)
+                f'mhp_hists_area_dt{trj_slices[0].dt}.png',
+                bbox_inches='tight', dpi=300)
     logging.info('done.')
 
 
-def mhp_all(trj_slices: list, calculate: bool, plot: bool) -> None:
+def stats_by_mhp(df: pd.DataFrame) -> pd.DataFrame:
+    '''
+    compare phob neutr phil columns in df
+    using Kruskal-Wallis test followed by post-hoc Dunn test with Holm p-adjust
+    '''
+    dict_by_mhp = {
+        'index': [],
+        'system': [],
+        'CHL amount, %': [],
+        'phob vs neutr': [],
+        'neutr vs phil': [],
+        'phil vs phob': []
+    }
+
+    for syst in df['index'].unique():
+
+        data = [df[df['index'] == syst]['phob'],
+                df[df['index'] == syst]['neutr'],
+                df[df['index'] == syst]['phil']]
+
+        kruskal_p = stats.kruskal(*data).pvalue
+        if kruskal_p < 0.01:
+            p_values = scikit_posthocs.posthoc_dunn(data, p_adjust='holm')
+        else:
+            p_values = pd.DataFrame({1: [1, kruskal_p, kruskal_p],
+                                     2: [kruskal_p, 1, kruskal_p],
+                                     3: [kruskal_p, kruskal_p, 1]})
+            p_values.index += 1
+
+        dict_by_mhp['index'].append(syst)
+        dict_by_mhp['system'].append(syst.split('_chol', 1)[0])
+        dict_by_mhp['CHL amount, %'].append(
+            '0'
+            if len(syst.split('_chol', 1)) == 1
+            else syst.split('_chol', 1)[1])
+        dict_by_mhp['phob vs neutr'].append(p_values.loc[1, 2])
+        dict_by_mhp['neutr vs phil'].append(p_values.loc[2, 3])
+        dict_by_mhp['phil vs phob'].append(p_values.loc[1, 3])
+
+    return pd.DataFrame(dict_by_mhp)
+
+
+def stats_by_chl_amount(df: pd.DataFrame) -> pd.DataFrame:
+    '''
+    compare 0 10 30 50 CHL amount in df for phob, neutr, phil fractions
+    using Kruskal-Wallis test followed by post-hoc Dunn test with Holm p-adjust
+    '''
+    dict_by_mhp = {
+        'system': [],
+        'mhp': [],
+        '0 vs 10': [],
+        '10 vs 30': [],
+        '30 vs 50': [],
+    }
+
+    for syst in df['system'].unique():
+        for mhp in ('phil', 'neutr', 'phob'):
+            data = [df[(df['system'] == syst)
+                       & (df['CHL amount, %'] == 0)][mhp],
+                    df[(df['system'] == syst)
+                       & (df['CHL amount, %'] == 10)][mhp],
+                    df[(df['system'] == syst)
+                       & (df['CHL amount, %'] == 30)][mhp],
+                    df[(df['system'] == syst)
+                       & (df['CHL amount, %'] == 50)][mhp]]
+            kruskal_p = stats.kruskal(*data).pvalue
+            if kruskal_p < 0.01:
+                p_values = scikit_posthocs.posthoc_dunn(data, p_adjust='holm')
+            else:
+                p_values = pd.DataFrame(
+                    {1: [1, kruskal_p, kruskal_p, kruskal_p],
+                     2: [kruskal_p, 1, kruskal_p, kruskal_p],
+                     3: [kruskal_p, kruskal_p, 1, kruskal_p],
+                     4: [kruskal_p, kruskal_p, kruskal_p, 1]})
+                p_values.index += 1
+
+
+def calc_mhp_area_all_stats(trj_slices: list):
+    '''
+    compare 0 10 30 50 CHL for phob phil neutr
+    compare phob phil neutr for 0 10 30 50 CHL
+    compare systems in exp (each mhp each CHL amount)
+    '''
+    logging.info('calculating statistics...')
+    df = pd.read_csv(
+        PATH / 'notebooks' / 'mhpmaps' /
+        'for_hists_fractions_'
+        f'{trj_slices[0].b}-{trj_slices[0].e}-{trj_slices[0].dt}.csv')
+
+    # compare 0 10 30 50 CHL for phob phil neutr
+    logging.info('by mhp difference...')
+    df_by_mhp = stats_by_mhp(df)
+    df_by_mhp.to_csv(
+        PATH / 'notebooks' / 'mhpmaps' / 'stats' /
+        'area_all_by_mhp_'
+        f'{trj_slices[0].b}-{trj_slices[0].e}-{trj_slices[0].dt}.csv',
+        index=False
+    )
+
+    # compare phob phil neutr for 0 10 30 50 CHL
+    logging.info('by CHL amount difference...')
+    df_by_mhp = stats_by_chl_amount(df)
+
+
+# %%
+
+def mhp_all(trj_slices: list,
+            calculate: bool, plot: bool, stat: bool) -> None:
     '''
     calculate and plot ratio of areas with different mhp values
+    also calculate statistics
     '''
     if calculate:
         calc_fractions_all(trj_slices)
     if plot:
         plot_mhp_ratio_all(trj_slices)
+    if stat:
+        calc_mhp_area_all_stats(trj_slices)
 
 
-def mhp_chol(trj_slices: list, calculate: bool, plot: bool) -> None:
+def mhp_chol(trj_slices: list,
+             calculate: bool, plot: bool, stat: bool) -> None:
     '''
-    calculate and plot ratio of areas with different mhp values composed by atoms of CHL
-    on the surface. also shows data
+    calculate and plot ratio of areas with different mhp values
+    composed by atoms of CHL on the surface
+    also calculate statistics
     '''
 
 
@@ -274,11 +407,14 @@ def plot_area_fractions(
     ctx: typer.Context,
     fraction_types: Tuple[bool, bool, bool, bool] = typer.Option(
         (True, True, True, True),
-        help='tasks to run [dim](pick from [bold]mhp_all, mhp_chol, chol_all, mhp_time[/])[/]'),
+        help='tasks to run [dim](pick from '
+        '[bold]mhp_all, mhp_chol, chol_all, mhp_time[/])[/]'),
     calculate: bool = typer.Option(
         True, help='calculate and dump fractions from scratch'),
     plot: bool = typer.Option(
         True, help='plot fractions'),
+    stat: bool = typer.Option(
+        True, help='calculate statistics'),
 ):
     '''
     plot hydrophilic/neutral/hydrophobic area fractions ratios for bilayers
@@ -290,13 +426,14 @@ def plot_area_fractions(
     systems = flatten([(i, i + '_chol10', i + '_chol30', i + '_chol50')
                        for i in flatten(EXPERIMENTS.values())])
     systems = list(dict.fromkeys(systems))
-    trajectory_slices = [TrajectorySlice(System(PATH, s, xtc, tpr), b, e, dt) for s in systems]
+    trajectory_slices = [TrajectorySlice(System(PATH, s, xtc, tpr), b, e, dt)
+                         for s in systems]
 
     if fraction_types[0]:
-        mhp_all(trajectory_slices, calculate, plot)
+        mhp_all(trajectory_slices, calculate, plot, stat)
 
     if fraction_types[1]:
-        mhp_chol(trajectory_slices, calculate, plot)
+        mhp_chol(trajectory_slices, calculate, plot, stat)
 
 
 @app.command()
@@ -336,10 +473,21 @@ def callback(ctx: typer.Context,
                  True, help='send updates info in telegram',
                  rich_help_panel='Script config')):
     '''set of utilities to obtain and plot mhp data'''
-    ctx.obj = (xtc, tpr, b, e, dt, n_workers, verbose, messages)  # store command arguments
+    # store command line arguments
+    ctx.obj = (xtc, tpr, b, e, dt, n_workers, verbose, messages)
 
 
 # %%
 
 if __name__ == '__main__':
     app()
+
+
+# %%
+# systems = flatten([(i, i + '_chol10', i + '_chol30', i + '_chol50')
+#                    for i in flatten(EXPERIMENTS.values())])
+# systems = list(dict.fromkeys(systems))
+# trajectory_slices = [TrajectorySlice(System(
+#     PATH, s, 'pbcmol_201.xtc', '201_ns.tpr'),
+#     200, 201, 1) for s in systems]
+trj_slices = trajectory_slices

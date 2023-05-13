@@ -101,7 +101,7 @@ def reformat_trajectory(syst: str) -> bool:
     try:
         traj = sorted([i for i in ls if i.startswith('traj_comp')])[-1]
     except IndexError:
-        send_message(f'couldn\'t reformat trajectory for {s}, no traj file')
+        send_message(f'couldn\'t reformat trajectory for {syst}, no traj file')
 
     msg = f'{syst} trajectory reformatting failed'
     cmd = ['. /usr/local/gromacs-2021.5/bin/GMXRC &&',
@@ -109,7 +109,8 @@ def reformat_trajectory(syst: str) -> bool:
            '-pbc mol -o pbcmol_201.xtc']
 
     if not run_or_send_error(' '.join(cmd), msg,
-                             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL):
+                             stdout=subprocess.DEVNULL,
+                             stderr=subprocess.DEVNULL):
         return False
     return True
 
