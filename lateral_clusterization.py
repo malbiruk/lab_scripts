@@ -17,7 +17,9 @@ from MDAnalysis.analysis import leaflet
 from modules.constants import EXPERIMENTS, PATH
 from modules.general import (duration, flatten, print_1line, progress_bar,
                              sparkles)
-from modules.my_stats import bootstrap, stat_test_with_big_sample_size
+from modules.my_stats import (bootstrap, kruskal_critical_value,
+                              ks_critical_value, mw_critical_value,
+                              perform_stat_with_subsampling)
 from modules.traj import System, TrajectorySlice
 from scipy import stats
 from scipy.spatial.distance import pdist, squareform
@@ -325,7 +327,7 @@ def upd_dict_with_stat_tests_res_by_chl(p, df2: pd.DataFrame, df_by_chl: dict,
                 df2[(df2['system'] == syst)
                     & (df2['CHL amount, %'] == 50)]['cluster_size']]
 
-        stat_res = stat_test_with_big_sample_size(*data).res
+        stat_res = perform_stat_with_subsampling(*data).res
 
         df_by_chl['lipid'].append(mol)
         df_by_chl['threshold'].append(thresh)
@@ -374,7 +376,7 @@ def upd_dict_with_stat_tests_res_by_exp(p, df2: pd.DataFrame, df_by_exp: dict,
                 df2[(df2['system'] == systs[2]) & (
                     df2['CHL amount, %'] == chl_amount)]['cluster_size']]
 
-            stat_res = stat_test_with_big_sample_size(*data).res
+            stat_res = perform_stat_with_subsampling(*data).res
 
             df_by_exp['lipid'].append(mol)
             df_by_exp['threshold'].append(thresh)
@@ -405,7 +407,7 @@ def upd_dict_with_stat_tests_res_by_exp(p, df2: pd.DataFrame, df_by_exp: dict,
     p.remove_task(p.tasks[-1].id)
 
 
-def perform_stat_tests_by_chl_by_exp(trj_slices: list) -> None:
+def subsampling_by_chl_by_exp(trj_slices: list) -> None:
     '''
     perform Kruskal-Wallis test followed by post-hoc Dunn test
     with Holm p-adjust
@@ -490,19 +492,22 @@ def perform_stat_tests_by_chl_by_exp(trj_slices: list) -> None:
     by_exp = pd.DataFrame(df_by_exp)
 
     by_chl.to_csv(PATH / 'notebooks' / 'gclust' / 'stats' /
-                  f'cl_sizes_by_chl_amount_{trj_slices[0].b}-{trj_slices[0].e}-'
+                  'cl_sizes_subsampling_by_chl_amount_'
+                  f'{trj_slices[0].b}-{trj_slices[0].e}-'
                   f'{trj_slices[0].dt}.csv', index=False)
     by_exp.to_csv(PATH / 'notebooks' / 'gclust' / 'stats' /
-                  f'cl_sizes_by_exp_{trj_slices[0].b}-{trj_slices[0].e}-'
+                  'cl_sizes_subsampling_by_exp_'
+                  f'{trj_slices[0].b}-{trj_slices[0].e}-'
                   f'{trj_slices[0].dt}.csv', index=False)
 
 
-def perform_stat_tests_by_comp(trj_slices: list) -> None:
+def subsampling_by_comp(trj_slices: list, postfix='', **kwargs) -> None:
     '''
     for each threshold (3, 5, 7)
     for each system and each chl amount (10, 30, 50)
     perform Mann-Whitneyu U-test comapring cluster sizes of CHL consisting of
     vertical or horizontal components (of CHL tilt angle)
+    kwargs go to perform_stat_with_subsampling function
     '''
 
     mw_comps_dict = {
@@ -550,10 +555,9 @@ def perform_stat_tests_by_comp(trj_slices: list) -> None:
                     mw_comps_dict['system'].append(syst)
                     mw_comps_dict['CHL amount, %'].append(chl_amount)
 
-                    stats_res = stat_test_with_big_sample_size(
+                    stats_res = perform_stat_with_subsampling(
                         hor, ver,
-                        stat_test=stats.mannwhitneyu,
-                        need_posthoc=False).res
+                        need_posthoc=False, **kwargs).res
 
                     for col in stats_res.columns:
                         mw_comps_dict[col].append(stats_res.loc[0, col])
@@ -562,11 +566,12 @@ def perform_stat_tests_by_comp(trj_slices: list) -> None:
 
     mv_comps = pd.DataFrame(mw_comps_dict)
     mv_comps.to_csv(PATH / 'notebooks' / 'gclust' / 'stats' /
-                    f'cl_sizes_by_comp_{trj_slices[0].b}-{trj_slices[0].e}-'
+                    f'cl_sizes_subsampling_by_comp_{postfix}_'
+                    f'{trj_slices[0].b}-{trj_slices[0].e}-'
                     f'{trj_slices[0].dt}.csv', index=False)
 
 
-def get_clsizes_mean_std(trj_slices: list, components: bool = False) -> None:
+def get_clsizes_stats(trj_slices: list, components: bool = False) -> None:
     '''
     get mean cluster size and std of cluster sizes for each system
     '''
@@ -591,11 +596,6 @@ def get_clsizes_mean_std(trj_slices: list, components: bool = False) -> None:
                                  'horizontal', np.nan))
                     groupby = ['timepoint', 'system',
                                'CHL amount, %', 'monolayer', 'component']
-
-                    df2 = all_counts.groupby(
-                        ['timepoint', 'system',
-                         'CHL amount, %', 'monolayer', 'component']).agg(
-                        cluster_size=('label', 'value_counts')).reset_index()
                 else:
                     groupby = ['timepoint', 'system',
                                'CHL amount, %', 'monolayer']
@@ -611,9 +611,10 @@ def get_clsizes_mean_std(trj_slices: list, components: bool = False) -> None:
                     {'cluster_size': ['count', 'mean', 'std', 'median',
                                       lambda x: np.quantile(x, .25),
                                       lambda x: np.quantile(x, .75),
-                                      lambda x: bootstrap(x, np.mean),
-                                      lambda x: bootstrap(x, np.median)]}
-                )
+                                      lambda x: bootstrap(
+                                          x, stat_test=np.mean),
+                                      lambda x: bootstrap(
+                                          x, stat_test=np.median)]})
 
                 mean_std_df.columns = groupby + [
                     'count_clsize', 'mean_clsize', 'std_clsize',
@@ -624,8 +625,8 @@ def get_clsizes_mean_std(trj_slices: list, components: bool = False) -> None:
                 for metric in ['mean', 'median']:
                     for type_ in ['low', 'high']:
                         mean_std_df[f'{metric}_ci_{type_}_clisize'] = [
-                        getattr(i, type_)
-                        for i in mean_std_df[f'{metric}_ci_size']]
+                            getattr(i, type_)
+                            for i in mean_std_df[f'{metric}_ci_clsize']]
 
                 mean_std_df.drop(
                     columns=['mean_ci_clsize', 'median_ci_clsize'],
@@ -638,14 +639,176 @@ def get_clsizes_mean_std(trj_slices: list, components: bool = False) -> None:
         df = pd.concat(dfs, ignore_index=True)
 
         if components:
-            filename = 'cl_sizes_components_mean_std_' \
+            filename = 'cl_sizes_components_stats_' \
                 f'{trj_slices[0].b}-' \
                 f'{trj_slices[0].e}-{trj_slices[0].dt}.csv'
 
         else:
-            filename = 'cl_sizes_mean_std_' \
+            filename = 'cl_sizes_stats_' \
                 f'{trj_slices[0].b}-{trj_slices[0].e}-' \
                 f'{trj_slices[0].dt}.csv'
+
+        df.to_csv(PATH / 'notebooks' / 'gclust' / 'stats' / filename,
+                  index=False)
+
+
+def calculate_confidence_intervals(trj_slices: list,
+                                   by: str,
+                                   stat_test=None,
+                                   alpha: float = .05,
+                                   postfix=''):
+    '''
+    perform stat test on data and
+    obtain confidence intervals using bootstraping.
+
+    by: exp, chol, comp -- 3 modes
+    if stat_test == None, will perform Manna-Whitney test for two groups
+    and Kruskal-Wallis test for more then 2 groups
+    '''
+    mols = ['CHL', 'PL'] if by != 'comp' else ['CHL']
+
+    dfs = []
+
+    obt_critical_value = {stats.mannwhitneyu: mw_critical_value,
+                          stats.kruskal: kruskal_critical_value,
+                          stats.ks_2samp: ks_critical_value}
+
+    with progress_bar as p:
+        for mol in p.track(mols, description='lipid'):
+            for thresh in p.track([3, 5, 7], description='threshold'):
+                all_counts = pd.read_csv(
+                    PATH / 'notebooks' / 'gclust' /
+                    f'{mol}_clusters_'
+                    f'{trj_slices[0].b}-{trj_slices[0].e}-'
+                    f'{trj_slices[0].dt}_thresh_{thresh}.csv')
+
+                if mol == 'CHL' or by == 'comp':
+                    all_counts['component'] = np.where(
+                        all_counts['1'] == 1,
+                        'vertical',
+                        np.where(all_counts['2'] == 1,
+                                 'horizontal', np.nan))
+                    groupby = ['timepoint', 'system',
+                               'CHL amount, %', 'monolayer', 'component']
+                else:
+                    groupby = ['timepoint', 'system',
+                               'CHL amount, %', 'monolayer']
+
+                df2 = (all_counts.groupby(groupby)['label']
+                                 .value_counts()
+                                 .reset_index(name='cluster_size'))
+
+                if by == 'exp':
+                    chl_amounts = ((0, 10, 30, 50)
+                                   if mol == 'PL'
+                                   else (10, 30, 50))
+                    for exp in p.track(EXPERIMENTS,
+                                       description='tests by experiment'):
+                        for chl_amount in chl_amounts:
+                            systs = EXPERIMENTS[exp]
+                            data = (
+                                [df2[(df2['system'] == systs[0])
+                                 & (df2['CHL amount, %'] == chl_amount)]
+                                 ['cluster_size'],
+                                    df2[(df2['system'] == systs[1])
+                                 & (df2['CHL amount, %'] == chl_amount)]
+                                    ['cluster_size'],
+                                    df2[(df2['system'] == systs[2])
+                                 & (df2['CHL amount, %'] == chl_amount)]
+                                    ['cluster_size']])
+
+                            stat_test = (stat_test if stat_test is not None
+                                         else stats.kruskal)
+                            low, high = bootstrap(*data, stat_test=stat_test)
+                            stat, pval = stat_test(*data)
+                            crit_val = obt_critical_value.get(
+                                stat_test)(*data, alpha)
+
+                            stat_res = pd.DataFrame({
+                                'lipid': [mol],
+                                'threshold': [thresh],
+                                'CHL amount, %': [chl_amount],
+                                'experiment': [exp],
+                                'statistic': [stat],
+                                'low_ci': [low],
+                                'high_ci': [high],
+                                'p-value': [pval],
+                                'critical_value': [crit_val]
+                            })
+                            dfs.append(stat_res)
+                    p.remove_task(p.tasks[-1].id)
+
+                elif by == 'chl':
+                    for syst in p.track(df2['system'].unique(),
+                                        description='tests by chl amount'):
+                        data = ([df2[(df2['system'] == syst)
+                                     & (df2['CHL amount, %'] == 10)]
+                                 ['cluster_size'],
+                                df2[(df2['system'] == syst)
+                                    & (df2['CHL amount, %'] == 30)]
+                                 ['cluster_size'],
+                                df2[(df2['system'] == syst)
+                                    & (df2['CHL amount, %'] == 50)]
+                                 ['cluster_size']])
+                        stat_test = (stat_test if stat_test is not None
+                                     else stats.kruskal)
+                        low, high = bootstrap(*data, stat_test=stat_test)
+                        stat, pval = stat_test(*data)
+                        crit_val = obt_critical_value.get(
+                            stat_test)(*data, alpha)
+
+                        stat_res = pd.DataFrame({
+                            'lipid': [mol],
+                            'threshold': [thresh],
+                            'system': [syst],
+                            'statistic': [stat],
+                            'low_ci': [low],
+                            'high_ci': [high],
+                            'p-value': [pval],
+                            'critical_value': [crit_val]
+                        })
+                        dfs.append(stat_res)
+                    p.remove_task(p.tasks[-1].id)
+
+                elif by == 'comp':
+                    for syst in p.track(df2['system'].unique(),
+                                        description='performing MW test'):
+                        for chl_amount in (10, 30, 50):
+                            hor = df2[(df2['system'] == syst)
+                                      & (df2['CHL amount, %'] == chl_amount)
+                                      & (df2['component']
+                                         == 'horizontal')]['cluster_size']
+                            ver = df2[(df2['system'] == syst)
+                                      & (df2['CHL amount, %'] == chl_amount)
+                                      & (df2['component']
+                                         == 'vertical')]['cluster_size']
+                            stat_test = (stat_test if stat_test is not None
+                                         else stats.ks_2samp)
+                            low, high = bootstrap(hor, ver, stat_test=stat_test)
+                            stat, pval = stat_test(hor, ver)
+                            crit_val = obt_critical_value.get(
+                                stat_test)(hor, ver, alpha)
+
+                            stat_res = pd.DataFrame({
+                                'lipid': [mol],
+                                'threshold': [thresh],
+                                'system': [syst],
+                                'CHL amount, %': [chl_amount],
+                                'statistic': [stat],
+                                'low_ci': [low],
+                                'high_ci': [high],
+                                'p-value': [pval],
+                                'critical_value': [crit_val]
+                            })
+                            dfs.append(stat_res)
+                    p.remove_task(p.tasks[-1].id)
+            p.remove_task(p.tasks[-1].id)
+
+        df = pd.concat(dfs, ignore_index=True)
+
+        filename = f'cl_sizes_ci_by_{by}_{postfix}_' \
+            f'{trj_slices[0].b}-' \
+            f'{trj_slices[0].e}-{trj_slices[0].dt}.csv'
 
         df.to_csv(PATH / 'notebooks' / 'gclust' / 'stats' / filename,
                   index=False)
@@ -729,11 +892,22 @@ def main():
                            args.thresh, args.max_clsize)
 
     if args.stats:
-        perform_stat_tests_by_comp(trj_slices)
-        perform_stat_tests_by_chl_by_exp(trj_slices)
-        get_clsizes_mean_std(trj_slices)
-        get_clsizes_mean_std(trj_slices, components=True)
-    rich.print('[green]done.[/]')
+        rich.print('[italic yellow]getting confidence intervals...[/]')
+        # calculate_confidence_intervals(trj_slices, by='exp')
+        # calculate_confidence_intervals(trj_slices, by='chl')
+        calculate_confidence_intervals(
+            trj_slices, by='comp', stat_test=stats.mannwhitneyu, postfix='mw')
+        calculate_confidence_intervals(
+            trj_slices, by='comp', stat_test=stats.ks_2samp, postfix='ks')
+        # rich.print('[italic yellow]performing subsampling...[/]')
+        # subsampling_by_chl_by_exp(trj_slices)
+        # subsampling_by_comp(trj_slices, postfix='mw',
+        #                     stat_test=stats.mannwhitneyu)
+        # subsampling_by_comp(trj_slices, postfix='ks', stat_test=stats.ks_2samp)
+        # rich.print('[italic yellow]obtaining distr stats...[/]')
+        # get_clsizes_stats(trj_slices)
+        # get_clsizes_stats(trj_slices, components=True)
+    rich.print(rich.text.Text('\n[green]done.[/]', justify='center'))
 
 
 # %%

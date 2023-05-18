@@ -157,18 +157,18 @@ def get_stat_test_results(
     return optimal_size, power, effect_sizes, stat_res
 
 
-def stat_test_with_big_sample_size(*data: list,
-                                   alpha: float = .05,
-                                   stat_test: Callable = stats.kruskal,
-                                   need_posthoc: bool = True,
-                                   posthoc_test: Callable =
-                                   scikit_posthocs.posthoc_dunn,
-                                   p_adjust: str = 'holm',
-                                   n_tests: int = 1000,
-                                   n_posthoc_tests: int = 100,
-                                   effect_size_estimator: Callable = calc_dr,
-                                   **kwargs
-                                   ) -> namedtuple:
+def perform_stat_with_subsampling(*data: list,
+                                  alpha: float = .05,
+                                  stat_test: Callable = stats.kruskal,
+                                  need_posthoc: bool = True,
+                                  posthoc_test: Callable =
+                                  scikit_posthocs.posthoc_dunn,
+                                  p_adjust: str = 'holm',
+                                  n_tests: int = 1000,
+                                  n_posthoc_tests: int = 100,
+                                  effect_size_estimator: Callable = calc_dr,
+                                  **kwargs
+                                  ) -> namedtuple:
     '''
     get optimal sample size using subsampling
     then perform stat_test n_tests times.
@@ -264,22 +264,67 @@ def stat_test_with_big_sample_size(*data: list,
                   stat_vals, pvals)
 
 
-def bootstrap(data: pd.Series,
-              statistic: Callable,
-              n_resamples: int = 9999,
-              confidence_level: float = .95) -> namedtuple:
+def bootstrap(*data: pd.Series,
+              stat_test: Callable,
+              n_resamples: int = 1000,
+              confidence_level: float = .95,
+              **kwargs) -> namedtuple:
     '''
     compute a two-sided bootstrap confidence interval of a statistic
     returns confidence_interval;
     use attributes low, high
+
+    kwargs may be used in stat_test
     '''
-    bs_replicates = [statistic(data.sample(len(data), replace=True))
-                     for _ in range(n_resamples)]
     ConfidenceInterval = namedtuple('ConfidenceInterval',
                                     ['low', 'high'])
+    if len(data) == 1:
+        data = data[0]
+        bootstrap_stats = [stat_test(data.sample(len(data), replace=True))
+                           for _ in range(n_resamples)]
+
+    elif len(data) == 0:
+        raise ValueError('got empty array!')
+
+    else:
+        bootstrap_stats = np.zeros(n_resamples)
+        for i in range(n_resamples):
+            group_boots = [group.sample(len(group), replace=True)
+                           for group in data]
+            bootstrap_stats[i], _ = stat_test(*group_boots, **kwargs)
 
     percentile_low = (1 - confidence_level) / 2 * 100
     percentile_high = 100 - percentile_low
 
     return ConfidenceInterval(*np.percentile(
-        bs_replicates, [percentile_low, percentile_high]))
+        bootstrap_stats, [percentile_low, percentile_high]))
+
+
+def mw_critical_value(*data, alpha: float = .05) -> float:
+    '''
+    calculate critical value of mann whitney statistic
+    '''
+    n1 = len(data[0])
+    n2 = len(data[1])
+    # u_critical = min(statistic, n1 * n2 - statistic)
+    z_alpha = stats.norm.ppf(1 - alpha / 2)
+    return z_alpha * np.sqrt(n1 * n2 * (n1 + n2 + 1) / 12) + (n2 - n1 / 2)
+
+
+def kruskal_critical_value(*data, alpha: float = .05) -> float:
+    '''
+    calculate critical value of kruskal wallis statistic
+    '''
+    dof = len(data) - 1  # degrees of freedom
+    return stats.chi2.ppf(1 - alpha, dof)
+
+
+def ks_critical_value(*data, alpha: float = .05) -> float:
+    '''
+    calculate critical value of kolmogorov-smirnov statistic
+    '''
+    alpha = 0.05
+    n1 = len(data[0])
+    n2 = len(data[1])
+
+    return stats.ksone.ppf(1 - alpha / 2, n1 + n2)

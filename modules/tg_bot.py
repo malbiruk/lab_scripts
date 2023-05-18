@@ -1,5 +1,6 @@
 '''
-this module contains functions and constants to send messages via lab scripts telegram bot
+this module contains functions and constants to send messages
+via lab scripts telegram bot
 '''
 
 
@@ -31,7 +32,8 @@ def send_message(message: str, silent: bool = True):
         if not silent:
             rich.print(Markdown(message))
     else:
-        raise requests.exceptions.RequestException('message not sent.', answer.json())
+        raise requests.exceptions.RequestException('message not sent.',
+                                                   answer.json())
     return answer.json()
 
 

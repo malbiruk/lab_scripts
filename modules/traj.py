@@ -2,9 +2,9 @@
 this module includes classes which make it easier to operate with trajectories
 '''
 
+import os
 from dataclasses import dataclass, field
 from pathlib import Path, PosixPath
-import os
 
 
 @dataclass(frozen=True, unsafe_hash=True)
@@ -14,8 +14,8 @@ class System:
     '''
     path: PosixPath  # directory containing system directory
     name: str
-    xtc: str = 'pbcmol.xtc' # name of trajectory file
-    tpr: str = 'md.tpr' # name of topology file
+    xtc: str = 'pbcmol.xtc'  # name of trajectory file
+    tpr: str = 'md.tpr'  # name of topology file
     dir: str = field(init=False)
 
     def __post_init__(self):
@@ -47,7 +47,8 @@ class System:
         obtain residue names of system (MDAnalysis format)
         '''
         no_numbers = ''.join([i for i in self.name if not i.isdigit()])
-        return [i.upper() if not i == 'chol' else 'CHL' for i in no_numbers.split('_')]
+        return [i.upper() if not i == 'chol' else 'CHL'
+                for i in no_numbers.split('_')]
 
     def pl_selector(self, n=0) -> str:
         '''
@@ -79,16 +80,17 @@ class TrajectorySlice:
         generated slice is here:
         {self.system.dir}/md/pbcmol_{self.b}-{self.e}-{self.dt}.xtc
         '''
-        if not (Path(self.system.dir) / 'md' /
+        if (Path(self.system.dir) / 'md' /
                 f'pbcmol_{self.b}-{self.e}-{self.dt}.xtc').is_file():
+            return
             # print(str(Path(self.system.dir) / 'md' /
             #           f'pbcmol_{self.b}-{self.e}-{self.dt}.xtc') +
             #       ' already exists')
-        # else:
-            cmd = ['source /usr/local/gromacs-2021.5/bin/GMXRC && ',
-                   f'echo 0 | gmx trjconv -s {self.system.dir}/md/{self.system.tpr}',
-                   f'-f {self.system.dir}/md/{self.system.xtc}',
-                   f'-b {self.b * 1000} -e {self.e * 1000} -dt {self.dt}',
-                   f'-o {self.system.dir}/md/pbcmol_{self.b}-{self.e}-{self.dt}.xtc']
-            os.popen(' '.join(cmd)).read()
+            # else:
+        cmd = ['source /usr/local/gromacs-2021.5/bin/GMXRC && ',
+               f'echo 0 | gmx trjconv -s {self.system.dir}/md/{self.system.tpr}',
+               f'-f {self.system.dir}/md/{self.system.xtc}',
+               f'-b {self.b * 1000} -e {self.e * 1000} -dt {self.dt}',
+               f'-o {self.system.dir}/md/pbcmol_{self.b}-{self.e}-{self.dt}.xtc']
+        os.popen(' '.join(cmd)).read()
             # print('done ✅\n')

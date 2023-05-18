@@ -5,28 +5,25 @@ obtain and plot system parameters such as density profiles, area per lipid,
 thickness, Scd and cholesterol tilt angle
 '''
 
-from pathlib import Path, PosixPath
-from typing import Callable
-from concurrent.futures import ProcessPoolExecutor, ThreadPoolExecutor
 import argparse
 import os
 import sys
+from concurrent.futures import ProcessPoolExecutor, ThreadPoolExecutor
+from pathlib import Path, PosixPath
+from typing import Callable
+
+import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
-import matplotlib.pyplot as plt
 import seaborn as sns
-from scipy.interpolate import make_interp_spline
-
-from modules.general import (
-    opener, multiproc, flatten, sparkles,
-    duration, calc_1d_com, get_keys_by_value
-)
+from modules.constants import EXPERIMENTS, PATH, TO_RUS
+from modules.density import (calculate_density_peak_widths,
+                             calculate_distances_between_density_groups,
+                             get_densities, plot_density_profile)
+from modules.general import (calc_1d_com, duration, flatten, get_keys_by_value,
+                             multiproc, opener, sparkles)
 from modules.traj import System, TrajectorySlice
-from modules.density import (
-    get_densities, plot_density_profile, calculate_distances_between_density_groups,
-    calculate_density_peak_widths
-)
-from modules.constants import PATH, TO_RUS, EXPERIMENTS
+from scipy.interpolate import make_interp_spline
 
 
 def calculate_thickness(trj: TrajectorySlice) -> list[float]:
@@ -227,7 +224,7 @@ def calculate_relative_changes(df: pd.DataFrame) -> pd.DataFrame:
     return df_relative.sort_values(['experiment', 'CHL amount, %'])
 
 
-def plot_violins(csv: PosixPath, y: str) -> None:
+def plot_violins(csv: PosixPath, y: str, renamed_y: str = None) -> None:
     '''
     plot violinplot for distribution of parameters by experiment
     and barplot for relative changes
@@ -262,11 +259,13 @@ def plot_violins(csv: PosixPath, y: str) -> None:
                           aspect=0.75, sharex=False, dropna=True)
         g.map_dataframe(sns.violinplot, x=x, y=y, hue='CHL amount, %',
                         cut=0, palette='RdYlGn_r', inner='quartile')
-        g.axes[0][-1].legend(title=legend_title)
+        g.axes[0][1].legend(title=legend_title,
+                            ncol=len(df['CHL amount, %'].unique()),
+                            loc='upper center', bbox_to_anchor=(0.5, -0.15))
         # g.add_legend(title=legend_title)
         g.set_titles(col_template='{col_name}')
 
-        plt.savefig(str(csv).split('.', 1)[0] + out + '.png',
+        plt.savefig(str(csv).rsplit('.', 1)[0] + out + '.png',
                     bbox_inches='tight')
         plt.close()
 
@@ -275,7 +274,9 @@ def plot_violins(csv: PosixPath, y: str) -> None:
                           aspect=0.75, sharex=False, dropna=True)
         g.map_dataframe(sns.barplot, x=x, y=y2, hue='CHL amount, %',
                         palette='RdYlGn_r', ec='k')
-        g.axes[0][-1].legend(title=legend_title)
+        g.axes[0][1].legend(title=legend_title,
+                            ncol=len(df['CHL amount, %'].unique()),
+                            loc='upper center', bbox_to_anchor=(0.5, -0.15))
         # g.add_legend(title=legend_title)
         g.set_titles(col_template='{col_name}')
         for ax, exp in zip(g.axes[0], df_relative['experiment'].unique()):
@@ -291,11 +292,14 @@ def plot_violins(csv: PosixPath, y: str) -> None:
                         df_relative[df_relative['experiment'] == exp]['relative std'].tolist()[c])
                     c += 1
             ax.errorbar(x=x_coords, y=y_coords, yerr=yerr, fmt='none', c='k')
-        plt.savefig(str(csv).split('.', 1)[0] + '_relative' + out + '.png',
+        plt.savefig(str(csv).rsplit('.', 1)[0] + '_relative' + out + '.png',
                     bbox_inches='tight')
         plt.close()
 
     df = pd.read_csv(csv)
+    if renamed_y is not None:
+        df.rename(columns={y: renamed_y}, inplace=True)
+        y = renamed_y
     df = df[df.columns.intersection(
         ['system', 'experiment', 'CHL amount, %', y])]
 

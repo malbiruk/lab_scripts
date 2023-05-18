@@ -20,5 +20,6 @@ TO_RUS = {'dmpc': 'ДМФХ', 'dppc_325': 'ДПФХ', 'dspc': 'ДСФХ', 'popc'
           'scd': 'Scd', 'peak width, nm': 'Ширина пиков профилей плотности ХС, нм',
           'α, °': 'α, °',
           '% of horizontal component': '% горизонтальной компоненты',
-          '% of vertical component': '% вертикальной компоненты'
+          '% of vertical component': '% вертикальной компоненты',
+          '% of area': '% площади поверхности'
           }

@@ -434,7 +434,6 @@ def clust(path, syst, b, e, dt, option='hydrophobic', force=False, area_threshol
             syst, b, e, dt, option)
 
     else:
-
         def single_clust(mapp, bside, option='hydrophobic'):
             matrix = gaussian_filter(mapp, sigma=1)
             shrinkby = mapp.shape[0] / bside
@@ -467,7 +466,7 @@ def clust(path, syst, b, e, dt, option='hydrophobic', force=False, area_threshol
             class Cluster:
                 ID = 1
 
-                def __init__(self, clusters_list_slice, l):
+                def __init__(self, clusters_list_slice, l, area_threshold):
                     self.id = Cluster.ID
                     self.init_frame = clusters_list_slice
                     self.label = l
@@ -477,6 +476,7 @@ def clust(path, syst, b, e, dt, option='hydrophobic', force=False, area_threshol
                         self.init_frame == self.label)
                     self.size = len(self.position)
                     self.lifetime = 0
+                    self.area_threshold = area_threshold
                     Cluster.ID += 1
 
                 def __repr__(self):
@@ -486,10 +486,10 @@ def clust(path, syst, b, e, dt, option='hydrophobic', force=False, area_threshol
 
                 def same_as(self, other):
                     return len(set(self.flat_position)
-                               & set(other.flat_position)) * (1 / area_threshold) \
+                               & set(other.flat_position)) * (1 / self.area_threshold) \
                         > len(self.flat_position) \
                         and len(set(self.flat_position)
-                                & set(other.flat_position)) * (1 / area_threshold) \
+                                & set(other.flat_position)) * (1 / self.area_threshold) \
                         > len(other.flat_position)
 
                 def update_cluster(self, other, dt):
@@ -506,11 +506,11 @@ def clust(path, syst, b, e, dt, option='hydrophobic', force=False, area_threshol
             all_clusters = {i: [] for i in range(len(clusters_list))}
 
             # initiate clusters on frame 0
-            all_clusters[0] = [Cluster(clusters_list[0], labl)
+            all_clusters[0] = [Cluster(clusters_list[0], labl, area_threshold)
                                for labl in labels_list[0]]
 
             for ts in range(1, len(clusters_list)):
-                new_clusters = [Cluster(clusters_list[ts], labl)
+                new_clusters = [Cluster(clusters_list[ts], labl, area_threshold)
                                 for labl in labels_list[ts]]
                 old_clusters = all_clusters[ts - 1]
 
