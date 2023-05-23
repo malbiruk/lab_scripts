@@ -42,7 +42,7 @@ class System:
                 [i for i in self.get_tpr_props().split('\n')
                  if i.startswith('CHOL')][0].split('|')][1]
 
-    def resnames_from_systname(self) -> list[str]:
+    def resnames_from_systname(self) -> list:
         '''
         obtain residue names of system (MDAnalysis format)
         '''

@@ -5,6 +5,7 @@ general functions which are often used
 import logging
 import multiprocessing
 import subprocess
+import time
 from concurrent.futures import ProcessPoolExecutor, as_completed
 from datetime import datetime
 from datetime import timedelta as td
@@ -12,12 +13,12 @@ from pathlib import PosixPath
 from typing import Callable
 
 import numpy as np
+import rich
+from modules.tg_bot import send_message
 from rich.logging import RichHandler
 from rich.progress import (BarColumn, MofNCompleteColumn, Progress,
                            ProgressColumn, SpinnerColumn, Text, TextColumn,
                            TimeElapsedColumn, TimeRemainingColumn)
-
-from .tg_bot import send_message
 
 
 class SpeedColumn(ProgressColumn):
@@ -40,13 +41,14 @@ progress_bar = Progress(
     TextColumn('|'),
     TimeElapsedColumn(),
     TextColumn('|'),
-    TimeRemainingColumn(), 
+    TimeRemainingColumn(),
 )
 
 
 def initialize_logging(fname: str = 'out.log', debug: bool = False) -> None:
     '''
-    initialize logging (default to file 'out.log' in folder + rich to command line)
+    initialize logging (default to file 'out.log'
+    in folder + rich to command line)
     '''
     filehandler = logging.FileHandler(fname)
     filehandler.setFormatter(logging.Formatter(
@@ -67,7 +69,8 @@ def print_1line(str_: str, line_length=30):
 
 def realtime_output(cmd: str):
     '''
-    a wrapper for shell commands which outputs all shell output to shell instantly
+    a wrapper for shell commands which outputs all shell output
+    to shell instantly
     '''
     with subprocess.Popen(
         cmd,
@@ -100,11 +103,13 @@ def chunker(seq: list, size: int) -> list:
     return (seq[pos:pos + size] for pos in range(0, len(seq), size))
 
 
-def multiproc_show_multiple_progress(func: Callable, *args, n_workers: int = 8,
-                                     descr: str = 'Working',  messages: bool = False):
+def multiproc_show_multiple_progress(
+        func: Callable, *args, n_workers: int = 8,
+        descr: str = 'Working',  messages: bool = False):
     '''
     helper function for multiproc, executed when show_progress == multiple
     '''
+    #pylint: disable=too-many-locals
     result = {}
 
     with progress_bar as p:
@@ -116,13 +121,15 @@ def multiproc_show_multiple_progress(func: Callable, *args, n_workers: int = 8,
             task = p.tasks[-1]
 
             with ProcessPoolExecutor(max_workers=n_workers) as executor:
-                for c, i in enumerate(zip(*args)):
-                    task_id = p.add_task(f'task {c}', visible=False)
-                    futures[executor.submit(
-                        func, _progress, task_id, *i)] = i
+                futures = {executor.submit(
+                    func,
+                    _progress,
+                    p.add_task(f'task {c}', visible=False),  # tak_id
+                    *i): i for c, i in enumerate(zip(*args))}
 
                 completed = 0
-                while (n_finished := sum((f.done() for f in futures))) < len(futures):
+                while (n_finished := sum(
+                        (f.done() for f in futures))) < len(futures):
                     p.update(overall_task, completed=n_finished,
                              total=len(futures))
                     if n_finished != completed:
@@ -130,14 +137,16 @@ def multiproc_show_multiple_progress(func: Callable, *args, n_workers: int = 8,
                         if messages:
                             send_message(
                                 f'task "{task.description}": '
-                                '{task.completed}/{task.total} steps completed')
+                                f'{task.completed}/{task.total} '
+                                'steps completed')
                     for task_id, update_data in _progress.items():
                         # update the progress bar for this task:
                         p.update(
                             task_id,
                             completed=update_data['progress'],
                             total=update_data['total'],
-                            visible=update_data['progress'] < update_data['total'],
+                            visible=(update_data['progress']
+                                     < update_data['total']),
                         )
                 p.update(overall_task, completed=len(futures),
                          total=len(futures))
@@ -147,8 +156,12 @@ def multiproc_show_multiple_progress(func: Callable, *args, n_workers: int = 8,
                         f'finished time: {task.finished_time}\n'
                         f'finished speed: {task.finished_speed}')
 
-                for f, _ in futures.items():
-                    result[futures[f]] = f.result()
+                try:
+                    for f, _ in futures.items():
+                        result[futures[f]] = f.result()
+                except TypeError as e:
+                    rich.print(f'[bold red]Can\'t return results:[/]'
+                               f'\n{str(e)}')
     return result
 
 
@@ -165,7 +178,7 @@ def multiproc(func: Callable, *args, n_workers: int = 8,
     if show_progress multiple, func should have special structure
     and progress bar will show subtasks:
 
-    def func(progress: dict, task_id: process.Task, *args):
+    def func(progress: dict, task_id: int, *args):
         len_of_task = len({iterable})
         for c, _ in enumerate({iterable}):
             ...
@@ -174,8 +187,11 @@ def multiproc(func: Callable, *args, n_workers: int = 8,
     '''
 
     if show_progress == 'multiple':
-        result = multiproc_show_multiple_progress(func, *args, n_workers,
-                                                  descr, show_progress, messages)
+        return multiproc_show_multiple_progress(
+            func, *args,
+            n_workers=n_workers,
+            descr=descr,
+            messages=messages)
 
     result = {}
 
@@ -189,13 +205,46 @@ def multiproc(func: Callable, *args, n_workers: int = 8,
                 p.update(task_id, advance=1)
                 if messages:
                     send_message(
-                        f'task "{task.description}": {task.completed}/{task.total} steps completed')
-                result[futures[f]] = f.result()
+                        f'task "{task.description}": '
+                        f'{task.completed}/{task.total} steps completed')
+                try:
+                    result[futures[f]] = f.result()
+                except TypeError as e:
+                    rich.print(f'[bold red]Can\'t return results:[/]'
+                               f'\n{str(e)}')
         if messages:
             send_message(
                 f'task "{task.description}" completed\n'
                 f'finished time: {str(td(seconds=task.finished_time))} s')
     return result
+
+
+def find_optimal_n_workers(multiproc_func: Callable,
+                           n_min: int, n_max: int, step: int,
+                           *args, **kwargs) -> int:
+    '''
+    this function runs multiproc with all arguments several times with different
+    n_workers and determines the best based on speed of completing the task
+    '''
+    def measure_performance(n_workers: int, multiproc_func: Callable,
+                            *args, **kwargs):
+        start_time = time.time()
+        multiproc_func(n_workers=n_workers, *args, **kwargs)
+        end_time = time.time()
+        execution_time = end_time - start_time
+        rich.print(f'n: {n_workers}, time: {execution_time}')
+        return execution_time
+
+    results = {}
+    # Test different values of n_workers
+    for n_workers in range(n_min, n_max, step):
+        execution_time = measure_performance(n_workers, multiproc_func,
+                                             *args, **kwargs)
+        results[n_workers] = execution_time
+    # Find the configuration with the minimum execution time
+    optimal_workers = min(results, key=results.get)
+
+    return optimal_workers, results
 
 
 def flatten(lst: list) -> list:

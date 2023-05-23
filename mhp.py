@@ -557,7 +557,7 @@ def plot_calc_chol_surf_fractions(trj_slices: list) -> None:
         width = 0.25
         positions = (x - width, x, x + width)
 
-        alphas = (1, 0.5, 0.3)
+        palette = sns.color_palette('RdYlGn_r', 3)
         systems = (
             [i + '_chol10' for i in EXPERIMENTS[exp]],
             [i + '_chol30' for i in EXPERIMENTS[exp]],
@@ -567,11 +567,11 @@ def plot_calc_chol_surf_fractions(trj_slices: list) -> None:
             labels = ('10% CHL', '30% CHL', '50% CHL')
         else:
             labels = (None, None, None)
-        for systs, pos, alpha, label in zip(
-                systems, positions, alphas, labels):
+        for systs, pos, color, label in zip(
+                systems, positions, palette, labels):
             ax.bar(pos, df.loc[systs, :]['chl_fraction'], width,
                    yerr=df.loc[systs, :]['chl_fraction_std'], capsize=5,
-                   label=label, color='C0', alpha=alpha)
+                   label=label, color=color)
 
             # single black edges independent on alpha
             ax.bar(pos, df.loc[systs, :]['chl_fraction'], width,
@@ -738,29 +738,31 @@ def plot_mhp_clusters(trj_slices: list, option: str,
 
                     sns.histplot(data=data, x=x, alpha=.2, hue='CHL amount, %',
                                  stat='density', fill=True, binwidth=binwidth,
-                                 legend=ax == axs[-1],
+                                 legend=ax == axs[-1], common_norm=False,
                                  palette='RdYlGn_r', ax=ax)
 
                     sns.histplot(data=data, x=x, hue='CHL amount, %',
                                  stat='density', fill=False, binwidth=binwidth,
-                                 legend=False,
+                                 legend=False, common_norm=False,
                                  palette='RdYlGn_r', ax=ax, lw=2)
                 else:
                     sns.histplot(data=data, x=x, alpha=.2, lw=0,
                                  hue='CHL amount, %',
                                  palette='RdYlGn_r', stat='density', ax=ax,
                                  binwidth=.15, log_scale=True,
+                                 common_norm=False,
                                  legend=ax == axs[-1])
                     sns.histplot(data=data, x=x, lw=2, fill=False, alpha=.5,
                                  legend=False,
                                  element='step', hue='CHL amount, %',
                                  palette='RdYlGn_r', stat='density', ax=ax,
-                                 binwidth=.15, log_scale=True)
+                                 binwidth=.15, log_scale=True,
+                                 common_norm=False,)
                     sns.kdeplot(data=data, x=x, lw=5,
-                                 hue='CHL amount, %',
-                                 palette='RdYlGn_r', ax=ax,
-                                 log_scale=True,
-                                 legend=False)
+                                hue='CHL amount, %',
+                                palette='RdYlGn_r', ax=ax, common_norm=False,
+                                log_scale=True,
+                                legend=False)
 
                     ax.set_xlim(1)
                 ax.set_title(syst)
@@ -773,6 +775,40 @@ def plot_mhp_clusters(trj_slices: list, option: str,
                 f'{option}_{fname}dt{trj_slices[0].dt}.png',
                 bbox_inches='tight', dpi=300)
     logging.info('done.')
+
+
+def plot_mhp_hists_single_exp(progress: dict, task_id: int,
+                              df: pd.DataFrame,
+                              trj_slices: list, exp: str) -> None:
+    '''
+    plot overall distribution of mhp values per system for single experiment
+    from EXPERIMENTS
+
+    progress and tak_id are needed for multiproc
+    df -- dataframe with all mhp values
+    trj_slices -- list of all trajectories
+    exp -- key from EXPERIMENTS dict
+    '''
+
+    len_of_task = len(EXPERIMENTS[exp])
+    fig, axs = plt.subplots(1, 3, figsize=(20, 7), sharex=True, sharey=True)
+    for c, (ax, syst) in enumerate(zip(axs, EXPERIMENTS[exp])):
+        data = df[df['system'] == syst]
+        sns.kdeplot(data=data, x='mhp', hue='CHL amount, %', ax=ax,
+                    legend=ax == axs[-1], palette='RdYlGn_r',
+                    common_norm=False, fill=True, alpha=.2)
+        ax.axvline(-0.5, ls=':', c='k')
+        ax.axvline(0.5, ls=':', c='k')
+        progress[task_id] = progress[task_id] = {'progress': c + 1,
+                                                 'total': len_of_task}
+
+    fig.suptitle(exp)
+    fig.savefig(
+        PATH / 'notebooks' / 'mhpmaps' / 'imgs' /
+        f'{"_".join(exp.split())}_mhp_values_kde_'
+        f'{trj_slices[0].b}-{trj_slices[0].e}-'
+        f'{trj_slices[0].dt*10}.png',
+        bbox_inches='tight', dpi=300)
 
 
 @app.command()
@@ -841,8 +877,35 @@ def area_fractions(
 
 
 @ app.command()
-def plot_mhp_hists():
-    pass
+def plot_mhp_hists(ctx: typer.Context):
+    '''
+    plot overall distribution of mhp values per system
+    '''
+    sns.set(style='ticks', context='talk', palette='muted')
+
+    xtc, tpr, b, e, dt, _, verbose, _ = ctx.obj
+    initialize_logging('mhp_fractions.log', verbose)
+    systems = flatten([(i, i + '_chol10', i + '_chol30', i + '_chol50')
+                       for i in flatten(EXPERIMENTS.values())])
+    systems = list(dict.fromkeys(systems))
+    trj_slices = [TrajectorySlice(System(PATH, s, xtc, tpr), b, e, dt)
+                  for s in systems]
+
+    logging.info('loading data...')
+    df = pd.read_csv(PATH / 'notebooks' / 'mhpmaps' / 'info_mhp_atoms_'
+                     f'{trj_slices[0].b}-{trj_slices[0].e}-'
+                     f'{trj_slices[0].dt*10}.csv',
+                     usecols=['system', 'CHL amount, %', 'mhp'])
+
+    logging.info('drawing plots...')
+    multiproc(plot_mhp_hists_single_exp,
+              [df] * len(EXPERIMENTS),
+              [tuple(trj_slices)] * len(EXPERIMENTS),
+              EXPERIMENTS,
+              descr='plotting mhp dists',
+              n_workers=len(EXPERIMENTS),
+              show_progress='multiple')
+    logging.info('done.')
 
 
 @ app.command()
@@ -873,16 +936,16 @@ def clust(ctx: typer.Context,
 
     if plot:
         for option in ['hydrophobic', 'hydrophilic']:
-            # for lifetimes in [True, False]:
-            #     if lifetimes:
-            #         for bigger_lifetimes in [True, False]:
-            #             plot_mhp_clusters(trajectory_slices, option,
-            #                               lifetimes, bigger_lifetimes)
-            #     else:
-            #         plot_mhp_clusters(trajectory_slices, option,
-            #                           lifetimes, False)
-            plot_mhp_clusters(trajectory_slices, option,
-                                      False, False)
+            for lifetimes in [True, False]:
+                if lifetimes:
+                    for bigger_lifetimes in [True, False]:
+                        plot_mhp_clusters(trajectory_slices, option,
+                                          lifetimes, bigger_lifetimes)
+                else:
+                    plot_mhp_clusters(trajectory_slices, option,
+                                      lifetimes, False)
+            # plot_mhp_clusters(trajectory_slices, option,
+            #                   False, False)
 
 
 @ app.callback()

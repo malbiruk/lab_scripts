@@ -153,7 +153,8 @@ def lists_of_values_to_df(func: Callable, trj_slices: list[TrajectorySlice], *ar
     creates dataframe with columns system, mean, std
     '''
     records = []
-    for trj, i in multiproc(func, trj_slices, *args, 8).items():
+    results = multiproc(func, trj_slices, *args, n_workers=len(trj_slices))
+    for trj, i in results.items():
         records.append((trj[0].system.name, i))
     df = pd.DataFrame.from_records(
         records, columns=['system', 'data'])
