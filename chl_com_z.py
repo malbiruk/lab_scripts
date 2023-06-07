@@ -190,10 +190,34 @@ if __name__ == '__main__':
 
 
 # %%
-# systems = flatten([(i + '_chol10', i + '_chol30', i + '_chol50')
+# systems = flatten([(i, i + '_chol10', i + '_chol30', i + '_chol50')
 #                    for i in flatten(EXPERIMENTS.values())])
 # systems = list(dict.fromkeys(systems))
 # trajectory_slices = [TrajectorySlice(System(
 #     PATH, s, 'pbcmol_201.xtc', '201_ns.tpr'),
 #     200.0, 201.0, 1) for s in systems]
 # trj_slices = trajectory_slices
+
+
+# %%
+# import subprocess
+# from modules.tg_bot import send_message
+#
+# def create_pbcmol(syst):
+#     if (PATH / syst / 'md' / 'md.xtc').is_file():
+#         cmd = ['source /usr/local/gromacs-2021.5/bin/GMXRC && ',
+#                f'echo 0 | gmx trjconv -s {str(PATH / syst)}/md/md.tpr',
+#                f'-f {str(PATH / syst)}/md/md.xtc',
+#                '-pbc mol',
+#                f'-o {str(PATH / syst)}/md/pbcmol.xtc']
+#         subprocess.run(' '.join(cmd), shell=True, check=True,
+#                        stdout=subprocess.DEVNULL,
+#                        stderr=subprocess.DEVNULL)
+#         print(f'{syst}: sucessfully done')
+#
+#     else:
+#         print(f'\n\n\n{syst}: NO MD.XTC FILE!\n\n\n')
+#         send_message(f'{syst}: no md.xtc file')
+#
+#
+# multiproc(create_pbcmol, systems, n_workers=len(systems), messages=True)

@@ -55,6 +55,7 @@ GRP1="{grp1+'///' if grp2 is not None else ''}"
 GRP2="{grp2+'///' if grp2 is not None else ''}"
 CLIST={contact_type}
 PERATOM={per_atom}
+RCHIST=1
 FMT=csv
 OUT="{grp1}_{grp2_name + contact_type}"'''
 
@@ -76,16 +77,22 @@ OUT="{grp1}_{grp2_name + contact_type}"'''
     return False
 
 
-def import_ft_table(csv: Path) -> pd.DataFrame:
+def import_ft_table(csv: Path, atoms: bool = True) -> pd.DataFrame:
     '''
     parse _ft.csv files for correct representation in pandas
     '''
     df = pd.read_csv(csv, sep=r'\s+|,', engine='python', header=None,
                      skiprows=1)
-    df.drop(columns=[0, 7, 2, 4, 8, 10, 12], inplace=True)
-    df.rename(columns={
-        1: 'dmi', 3: 'dmn', 5: 'dan', 6: 'dai', 9: 'ami', 11: 'amn',
-        13: 'aan', 14: 'aai', 15: 'dt_fr', 16: 'dt_tm'}, inplace=True)
+    if atoms:
+        df.drop(columns=[0, 7, 2, 4, 8, 10, 12], inplace=True)
+        df.rename(columns={
+            1: 'dmi', 3: 'dmn', 5: 'dan', 6: 'dai', 9: 'ami', 11: 'amn',
+            13: 'aan', 14: 'aai', 15: 'dt_fr', 16: 'dt_tm'}, inplace=True)
+    else:
+        df.drop(columns=[0, 1, 4, 5, 6, 7, 8, 11, 12], inplace=True)
+        df.rename(columns={
+            2: 'dmi', 3: 'dmn', 9: 'ami', 10: 'amn', 13: 'dt_fr', 14: 'dt_tm'
+        }, inplace=True)
     return df
 
 
@@ -433,6 +440,298 @@ def retrieve_chl_lip_over_lip_lip_ratios(trj_slices: list) -> None:
     df_all.to_csv(fname, index=False)
 
 
+def retrieve_chl_chl_over_lip_lip_ratios(trj_slices: list) -> None:
+    '''
+    calculate ratios of ft of CHL-CHL contacts over all LIP-LIP contacts
+    ci obtained using bootstrapping
+    '''
+    fname = (PATH / 'notebooks' / 'contacts' /
+             f'chl_chl_over_lip_lip_ratios_'
+             f'{trj_slices[0].b}-{trj_slices[0].e}-'
+             f'{trj_slices[0].dt}.csv')
+
+    # if fname.is_file():
+    #     return
+
+    logging.info('retrieving ratios...')
+    to_df = []
+    with progress_bar as p:
+        for trj in p.track(trj_slices, description='trj'):
+            df = import_ft_table(PATH / trj.system.name / 'contacts' /
+                                 'lip_dc_dc_ft.csv', False)
+
+            # bootstrapping
+            bootstrapped_values = []
+            for _ in range(1000):
+                sampled = df.sample(frac=1, replace=True)
+                bootstrapped_values.append(
+                    sampled[(sampled['dmn'] == 'CHL')
+                            & (sampled['amn'] == 'CHL')]['dt_tm'].sum()
+                    / sampled['dt_tm'].sum() * 100)
+
+            bootstrapped_values = np.array(bootstrapped_values)
+            std = np.std(bootstrapped_values)
+            confidence_interval = 1.96 * (std
+                                          / np.sqrt(len(bootstrapped_values)))
+
+            row = {'index': trj.system.name,
+                   'system': trj.system.name.split('_chol', 1)[0],
+                   'CHL amount, %': trj.system.name.split('_chol', 1)[1],
+                   'CHL-CHL / LIP-LIP, %': (
+                       df[(df['dmn'] == 'CHL')
+                          & (df['amn'] == 'CHL')]['dt_tm'].sum()
+                       / df['dt_tm'].sum() * 100),
+                   'ci': confidence_interval,
+                   'std': std
+                   }
+            to_df.append(row)
+
+    df_all = pd.DataFrame(to_df)
+    df_all.to_csv(fname, index=False)
+    logging.info('done.')
+
+
+def plot_chl_chl_over_lip_lip_ratios(trj_slices: list) -> None:
+    '''
+    plot ratios of CHL-CHL contacts by distance and all LIP-LIP contacts
+    for all systems
+    '''
+    logging.info('plotting ratios...')
+
+    df = pd.read_csv(PATH / 'notebooks' / 'contacts' /
+                     f'chl_chl_over_lip_lip_ratios_'
+                     f'{trj_slices[0].b}-{trj_slices[0].e}-'
+                     f'{trj_slices[0].dt}.csv')
+    df.set_index('index', inplace=True)
+
+    fig, axs = plt.subplots(1, 3, figsize=(20, 7),
+                            sharey=True)
+
+    width = 0.25
+    palette = sns.color_palette('RdYlGn_r', 3)
+
+    for ax, exp in zip(axs, EXPERIMENTS):
+        x = np.arange(len(EXPERIMENTS[exp]))
+        positions = (x - width, x, x + width)
+        for c, chl_amount in enumerate([10, 30, 50]):
+            systs = [i + f'_chol{chl_amount}' for i in EXPERIMENTS[exp]]
+            label = chl_amount if ax == axs[0] else None
+            ax.bar(positions[c], df.loc[systs, 'CHL-CHL / LIP-LIP, %'],
+                   yerr=df.loc[systs, 'std'], width=width, ec='k',
+                   color=palette[c], capsize=5,
+                   error_kw={'elinewidth': 2}, label=label)
+        ax.set_title(exp)
+        ax.xaxis.set_ticks(x)
+        ax.set_xticklabels(EXPERIMENTS[exp])
+        ax.set_ylim(0)
+        if ax == axs[0]:
+            ax.set_ylabel('CHL-CHL / LIP-LIP, %')
+    fig.legend(loc='upper center', title='CHL amount, %',
+               bbox_to_anchor=(0.5, 0), ncol=3)
+    fig.savefig(PATH / 'notebooks' / 'contacts' / 'imgs' /
+                f'chl_chl_over_lip_lip_ratios_'
+                f'{trj_slices[0].b}-'
+                f'{trj_slices[0].e}-'
+                f'{trj_slices[0].dt}.png',
+                bbox_inches='tight')
+    logging.info('done.')
+
+
+def retrieve_pl_pl_over_lip_lip_ratios(trj_slices: list) -> None:
+    '''
+    calculate ratios of ft of CHL-CHL contacts over all LIP-LIP contacts
+    ci obtained using bootstrapping
+    '''
+    fname = (PATH / 'notebooks' / 'contacts' /
+             f'pl_pl_over_lip_lip_ratios_'
+             f'{trj_slices[0].b}-{trj_slices[0].e}-'
+             f'{trj_slices[0].dt}.csv')
+
+    # if fname.is_file():
+    #     return
+
+    logging.info('retrieving ratios...')
+    to_df = []
+    with progress_bar as p:
+        for trj in p.track(trj_slices, description='trj'):
+            df = import_ft_table(PATH / trj.system.name / 'contacts' /
+                                 'lip_dc_dc_ft.csv', False)
+
+            # bootstrapping
+            bootstrapped_values = []
+            for _ in range(1000):
+                sampled = df.sample(frac=1, replace=True)
+                bootstrapped_values.append(
+                    sampled[(sampled['dmn'] != 'CHL')
+                            & (sampled['amn'] != 'CHL')]['dt_tm'].sum()
+                    / sampled['dt_tm'].sum() * 100)
+
+            bootstrapped_values = np.array(bootstrapped_values)
+            std = np.std(bootstrapped_values)
+            confidence_interval = 1.96 * (std
+                                          / np.sqrt(len(bootstrapped_values)))
+
+            row = {'index': trj.system.name,
+                   'system': trj.system.name.split('_chol', 1)[0],
+                   'CHL amount, %': trj.system.name.split('_chol', 1)[1],
+                   'PL-PL / LIP-LIP, %': (
+                       df[(df['dmn'] != 'CHL')
+                          & (df['amn'] != 'CHL')]['dt_tm'].sum()
+                       / df['dt_tm'].sum() * 100),
+                   'ci': confidence_interval,
+                   'std': std
+                   }
+            to_df.append(row)
+
+    df_all = pd.DataFrame(to_df)
+    df_all.to_csv(fname, index=False)
+    logging.info('done.')
+
+
+def plot_pl_pl_over_lip_lip_ratios(trj_slices: list) -> None:
+    '''
+    plot ratios of PL-PL contacts by distance and all LIP-LIP contacts
+    for all systems
+    '''
+    logging.info('plotting ratios...')
+
+    df = pd.read_csv(PATH / 'notebooks' / 'contacts' /
+                     f'pl_pl_over_lip_lip_ratios_'
+                     f'{trj_slices[0].b}-{trj_slices[0].e}-'
+                     f'{trj_slices[0].dt}.csv')
+    df.set_index('index', inplace=True)
+
+    fig, axs = plt.subplots(1, 3, figsize=(20, 7),
+                            sharey=True)
+
+    width = 0.25
+    palette = sns.color_palette('RdYlGn_r', 3)
+
+    for ax, exp in zip(axs, EXPERIMENTS):
+        x = np.arange(len(EXPERIMENTS[exp]))
+        positions = (x - width, x, x + width)
+        for c, chl_amount in enumerate([10, 30, 50]):
+            systs = [i + f'_chol{chl_amount}' for i in EXPERIMENTS[exp]]
+            label = chl_amount if ax == axs[0] else None
+            ax.bar(positions[c], df.loc[systs, 'PL-PL / LIP-LIP, %'],
+                   yerr=df.loc[systs, 'std'], width=width, ec='k',
+                   color=palette[c], capsize=5,
+                   error_kw={'elinewidth': 2}, label=label)
+        ax.set_title(exp)
+        ax.xaxis.set_ticks(x)
+        ax.set_xticklabels(EXPERIMENTS[exp])
+        ax.set_ylim(0)
+        if ax == axs[0]:
+            ax.set_ylabel('PL-PL / LIP-LIP, %')
+    fig.legend(loc='upper center', title='CHL amount, %',
+               bbox_to_anchor=(0.5, 0), ncol=3)
+    fig.savefig(PATH / 'notebooks' / 'contacts' / 'imgs' /
+                f'pl_pl_over_lip_lip_ratios_'
+                f'{trj_slices[0].b}-'
+                f'{trj_slices[0].e}-'
+                f'{trj_slices[0].dt}.png',
+                bbox_inches='tight')
+    logging.info('done.')
+
+
+def retrieve_chl_pl_over_lip_lip_ratios(trj_slices: list) -> None:
+    '''
+    calculate ratios of ft of CHL-PL contacts over all LIP-LIP contacts
+    ci obtained using bootstrapping
+    '''
+    fname = (PATH / 'notebooks' / 'contacts' /
+             f'chl_pl_over_lip_lip_ratios_'
+             f'{trj_slices[0].b}-{trj_slices[0].e}-'
+             f'{trj_slices[0].dt}.csv')
+
+    # if fname.is_file():
+    #     return
+
+    logging.info('retrieving ratios...')
+    to_df = []
+    with progress_bar as p:
+        for trj in p.track(trj_slices, description='trj'):
+            df = import_ft_table(PATH / trj.system.name / 'contacts' /
+                                 'lip_dc_dc_ft.csv', False)
+
+            # bootstrapping
+            bootstrapped_values = []
+            for _ in range(1000):
+                sampled = df.sample(frac=1, replace=True)
+                bootstrapped_values.append(
+                    sampled[(sampled['dmn'] == 'CHL')
+                            & (sampled['amn'] == 'CHL')]['dt_tm'].sum()
+                    / sampled['dt_tm'].sum() * 100)
+
+            bootstrapped_values = np.array(bootstrapped_values)
+            std = np.std(bootstrapped_values)
+            confidence_interval = 1.96 * (std
+                                          / np.sqrt(len(bootstrapped_values)))
+
+            row = {'index': trj.system.name,
+                   'system': trj.system.name.split('_chol', 1)[0],
+                   'CHL amount, %': trj.system.name.split('_chol', 1)[1],
+                   'CHL-PL / LIP-LIP, %': (
+                       df[((df['dmn'] != 'CHL') & (df['amn'] == 'CHL'))
+                          | ((df['dmn'] == 'CHL') & (df['amn'] != 'CHL'))
+                          ]['dt_tm'].sum()
+                       / df['dt_tm'].sum() * 100),
+                   'ci': confidence_interval,
+                   'std': std
+                   }
+            to_df.append(row)
+
+    df_all = pd.DataFrame(to_df)
+    df_all.to_csv(fname, index=False)
+    logging.info('done.')
+
+
+def plot_chl_pl_over_lip_lip_ratios(trj_slices: list) -> None:
+    '''
+    plot ratios of CHL-PL contacts by distance and all LIP-LIP contacts
+    for all systems
+    '''
+    logging.info('plotting ratios...')
+
+    df = pd.read_csv(PATH / 'notebooks' / 'contacts' /
+                     f'chl_pl_over_lip_lip_ratios_'
+                     f'{trj_slices[0].b}-{trj_slices[0].e}-'
+                     f'{trj_slices[0].dt}.csv')
+    df.set_index('index', inplace=True)
+
+    fig, axs = plt.subplots(1, 3, figsize=(20, 7),
+                            sharey=True)
+
+    width = 0.25
+    palette = sns.color_palette('RdYlGn_r', 3)
+
+    for ax, exp in zip(axs, EXPERIMENTS):
+        x = np.arange(len(EXPERIMENTS[exp]))
+        positions = (x - width, x, x + width)
+        for c, chl_amount in enumerate([10, 30, 50]):
+            systs = [i + f'_chol{chl_amount}' for i in EXPERIMENTS[exp]]
+            label = chl_amount if ax == axs[0] else None
+            ax.bar(positions[c], df.loc[systs, 'CHL-PL / LIP-LIP, %'],
+                   yerr=df.loc[systs, 'std'], width=width, ec='k',
+                   color=palette[c], capsize=5,
+                   error_kw={'elinewidth': 2}, label=label)
+        ax.set_title(exp)
+        ax.xaxis.set_ticks(x)
+        ax.set_xticklabels(EXPERIMENTS[exp])
+        ax.set_ylim(0)
+        if ax == axs[0]:
+            ax.set_ylabel('CHL-PL / LIP-LIP, %')
+    fig.legend(loc='upper center', title='CHL amount, %',
+               bbox_to_anchor=(0.5, 0), ncol=3)
+    fig.savefig(PATH / 'notebooks' / 'contacts' / 'imgs' /
+                f'chl_pl_over_lip_lip_ratios_'
+                f'{trj_slices[0].b}-'
+                f'{trj_slices[0].e}-'
+                f'{trj_slices[0].dt}.png',
+                bbox_inches='tight')
+    logging.info('done.')
+
+
 def plot_chl_lip_over_lip_lip_ratios(trj_slices: list) -> None:
     '''
     plot ratios of CHL-PL contacts by distance and all LIP-LIP contacts
@@ -460,9 +759,10 @@ def plot_chl_lip_over_lip_lip_ratios(trj_slices: list) -> None:
                       aspect=0.75, sharex=False, dropna=True)
     g.map_dataframe(sns.barplot, x='system', y='CHL-PL / LIP-LIP, %',
                     hue='CHL amount, %', saturation=1, ci='sd',
-                    errwidth=2,
+                    errwidth=2, capsize=.1,
                     palette='RdYlGn_r', edgecolor='k', errcolor='k')
     g.axes[0][1].legend(ncol=len(df['CHL amount, %'].unique()),
+                        title='CHL amount, %',
                         loc='upper center', bbox_to_anchor=(0.5, -0.15))
     # g.add_legend(title=legend_title)
     g.set_titles(col_template='{col_name}')
@@ -651,12 +951,11 @@ def plot_chl_lip_groups_hb(trj_slices: list) -> None:
                 values_to_draw = values_to_draw.loc[systs]
 
                 ax.bar(pos[c], values_to_draw['dt_fr'], width,
-                       yerr=values_to_draw['dt_fr_std'],
                        label=labels[c], color=f'C{c}', alpha=alpha)
                 # single black edges independent on alpha
                 ax.bar(pos[c], values_to_draw['dt_fr'], width,
                        yerr=values_to_draw['dt_fr_std'], ec='k',
-                       fill=False, lw=2)
+                       fill=False, lw=1, error_kw={'elinewidth': 1})
 
         ax.set_title(exp)
         ax.xaxis.set_ticks(x)
@@ -669,8 +968,7 @@ def plot_chl_lip_groups_hb(trj_slices: list) -> None:
             PATH / 'notebooks' / 'contacts' / 'imgs' /
             f'hb_pl_groups_dt{trj_slices[0].dt}.png',
             bbox_inches='tight', dpi=300)
-        logging.info('done.')
-# %%
+    logging.info('done.')
 
 
 @ app.command()
@@ -698,14 +996,20 @@ def plot(ctx: typer.Context,
                                   if 'chol' in trj.system.name]
 
     if hbonds:
-        # create_contacts_mean_std_df(trajectory_slices)
-        # plot_hb_probabilities(trajectory_slices)
-        # plot_hb_lt_distributions(trajectory_slices)
+        create_contacts_mean_std_df(trajectory_slices)
+        plot_hb_probabilities(trajectory_slices)
+        plot_hb_lt_distributions(trajectory_slices)
         plot_chl_lip_groups_hb(trajectory_slices_only_chl)
 
     if dcontacts:
-        retrieve_chl_lip_over_lip_lip_ratios(trajectory_slices_only_chl)
-        plot_chl_lip_over_lip_lip_ratios(trajectory_slices_only_chl)
+        # retrieve_chl_lip_over_lip_lip_ratios(trajectory_slices_only_chl)
+        # plot_chl_lip_over_lip_lip_ratios(trajectory_slices_only_chl)
+        # retrieve_chl_chl_over_lip_lip_ratios(trajectory_slices_only_chl)
+        plot_chl_chl_over_lip_lip_ratios(trajectory_slices_only_chl)
+        # retrieve_pl_pl_over_lip_lip_ratios(trajectory_slices_only_chl)
+        plot_pl_pl_over_lip_lip_ratios(trajectory_slices_only_chl)
+        # retrieve_chl_pl_over_lip_lip_ratios(trajectory_slices_only_chl)
+        plot_chl_pl_over_lip_lip_ratios(trajectory_slices_only_chl)
 
 
 @duration
@@ -725,6 +1029,8 @@ def get(ctx: typer.Context,
     systems = flatten([(i, i + '_chol10', i + '_chol30', i + '_chol50')
                        for i in flatten(EXPERIMENTS.values())])
     systems = list(dict.fromkeys(systems))
+    removed_systems = ['popc_chol10', 'popc_chol30', 'popc_chol50']
+    systems = [s for s in systems if s not in removed_systems]
 
     trajectory_slices = [TrajectorySlice(System(PATH, s, trj, tpr), b, e, dt)
                          for s in systems]
@@ -775,22 +1081,22 @@ def get(ctx: typer.Context,
                   ('CHOL' for _ in trajectory_slices_only_chl),
                   (grp2_selectors),
                   ('dc' for _ in trajectory_slices_only_chl),
-                  (1 for _ in trajectory_slices_only_chl),
-                  n_workers=n_workers,
-                  messages=messages,
-                  descr='intrabilayer contacts'
-                  )
-
-        multiproc(calculate_contacts,
-                  trajectory_slices_only_chl,
-                  ('lip' for _ in trajectory_slices_only_chl),
-                  (None for _ in trajectory_slices_only_chl),
-                  ('dc' for _ in trajectory_slices_only_chl),
                   (0 for _ in trajectory_slices_only_chl),
                   n_workers=n_workers,
                   messages=messages,
                   descr='intrabilayer contacts'
                   )
+
+        # multiproc(calculate_contacts,
+        #           trajectory_slices_only_chl,
+        #           ('lip' for _ in trajectory_slices_only_chl),
+        #           (None for _ in trajectory_slices_only_chl),
+        #           ('dc' for _ in trajectory_slices_only_chl),
+        #           (0 for _ in trajectory_slices_only_chl),
+        #           n_workers=n_workers,
+        #           messages=messages,
+        #           descr='intrabilayer contacts'
+        #           )
         logging.info('intrabilayer contacts calculation done')
         logging.info('')
 
@@ -801,7 +1107,7 @@ def get(ctx: typer.Context,
                   ('CHOL' for _ in trajectory_slices_only_chl),
                   ('SOL' for _ in trajectory_slices_only_chl),
                   ('dc' for _ in trajectory_slices_only_chl),
-                  (1 for _ in trajectory_slices_only_chl),
+                  (0 for _ in trajectory_slices_only_chl),
                   n_workers=n_workers,
                   messages=messages,
                   descr='contacts with water'
@@ -842,6 +1148,7 @@ def callback(ctx: typer.Context,
     # store command arguments
 
 
+# %%
 if __name__ == '__main__':
     app()
 
@@ -853,25 +1160,4 @@ if __name__ == '__main__':
 #     PATH, s, 'pbcmol_201.xtc', '201_ns.tpr'),
 #     200.0, 201.0, 1) for s in systems]
 # trj_slices = trajectory_slices
-
-# %%
-# trj.system.pl_selector()[1:-4],
-# trj = TrajectorySlice(System(PATH, 'dopc_dops50_chol30'), 200, 201, 1)
-# calculate_contacts(trj, 'lip', None, 'hb', 1)
-
-# %% calculate contacts
-# calculate_contacts CHL+PL CHL+PL hb 1
-# calculate_contacts CHL+PL SOL hb 1
-# calculate_contacts CHL+PL CHL+PL cd 1
-
-# %% calculate areas
-# exposed_area CHL SOL
-# exposed_area PL SOL
-# exposed_area CHL PL
-
-# %% plots
-# hbonds (prob, lt):
-# CHL-PL, PL-PL, PL-SOL, CHL-SOL (per CHL/PL averaged by time)
-# hbonds (prob, lt):
-# CHL - dif groups of PL, PL-PL (dif groups), PL-SOL (dif groups)
-# contacts: CHL-PL / LIP-LIP
+# trj = trj_slices[0]

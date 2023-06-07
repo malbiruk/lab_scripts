@@ -112,3 +112,34 @@ len(np.unique(data))
 
 # %%
 set(systems) - set(ok_systems)
+
+
+# %%
+from modules.constants import PATH
+import pandas as pd
+from pathlib import Path
+
+
+def import_ft_table(csv: Path, atoms: bool = True) -> pd.DataFrame:
+    '''
+    parse _ft.csv files for correct representation in pandas
+    '''
+    df = pd.read_csv(csv, sep=r'\s+|,', engine='python', header=None,
+                     skiprows=1)
+    if atoms:
+        df.drop(columns=[0, 7, 2, 4, 8, 10, 12], inplace=True)
+        df.rename(columns={
+            1: 'dmi', 3: 'dmn', 5: 'dan', 6: 'dai', 9: 'ami', 11: 'amn',
+            13: 'aan', 14: 'aai', 15: 'dt_fr', 16: 'dt_tm'}, inplace=True)
+    else:
+        df.drop(columns=[0, 1, 4, 5, 6, 7, 8, 11, 12], inplace=True)
+        df.rename(columns={
+            2: 'dmi', 3: 'dmn', 9: 'ami', 10: 'amn', 13: 'dt_fr', 14: 'dt_tm'
+        }, inplace=True)
+    return df
+
+df = import_ft_table(PATH / 'dops_chol30' / 'contacts' / 'CHOL_SOL_dc_dc_ft.csv')
+
+
+# %%
+df['ami'].nunique()

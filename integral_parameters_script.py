@@ -78,7 +78,7 @@ def run_scd_py(trj: TrajectorySlice) -> None:
     '''
     if not Path(f'{trj.system.path}/notebooks/scd/'
                 f'{trj.system.name}_{trj.b}-{trj.e}-{trj.dt}_scd.csv').is_file():
-        cmd = ['/nfs/belka2/soft/impulse/dev/init/scd.py',
+        cmd = ['/nfs/belka2/soft/impulse/dev/inst/scd.py',
                f'-f {trj.system.dir}/md/pbcmol.xtc',
                f'-s {trj.system.dir}/md/md.tpr',
                f'-o {trj.system.path}/notebooks/scd/{trj.system.name}_{trj.b}-{trj.e}-{trj.dt}',
@@ -442,7 +442,8 @@ def plot_dp_by_exp(trj_slices: list[TrajectorySlice], rus: bool) -> None:
             i.set_ylabel('')
         axs[0].set_ylabel(ylabel)
         handles, labels = axs[0].get_legend_handles_labels()
-        fig.legend(handles, labels)
+        fig.legend(handles, labels,
+                   loc='upper center', bbox_to_anchor=(0.5, -0.1), ncol=3)
         if rus:
             fig.suptitle(TO_RUS[exp], fontsize=20)
         else:
@@ -535,7 +536,8 @@ def plot_scd_atoms(trj_slices: list[TrajectorySlice]) -> None:
                 ax.set_xlabel('C atom number')
         axs[0].set_ylabel('Scd')
         handles, labels = axs[0].get_legend_handles_labels()
-        fig.legend(handles, labels)
+        fig.legend(handles, labels,
+                   loc='upper center', bbox_to_anchor=(0.5, -0.1), ncol=4)
         if rus:
             fig.suptitle(TO_RUS[exp])
         else:

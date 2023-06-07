@@ -118,7 +118,7 @@ def get_densities(trj: TrajectorySlice) -> None:
     print('done ✅\n')
 
 
-def plot_density_profile(ax: axes._subplots.Axes,
+def plot_density_profile(ax,
                          trj: TrajectorySlice,
                          groups: list = None,
                          color: str = None,

@@ -766,7 +766,7 @@ def plot_mhp_clusters(trj_slices: list, option: str,
 
                     ax.set_xlim(1)
                 ax.set_title(syst)
-            fig.suptitle(exp)
+            fig.suptitle(exp + ' ' + option)
             fname = ('bigger_lifetimes_' if bigger_lifetimes else
                      'lifetimes_' if lifetimes else '')
             fig.savefig(
@@ -799,6 +799,7 @@ def plot_mhp_hists_single_exp(progress: dict, task_id: int,
                     common_norm=False, fill=True, alpha=.2)
         ax.axvline(-0.5, ls=':', c='k')
         ax.axvline(0.5, ls=':', c='k')
+        ax.set_title(syst)
         progress[task_id] = progress[task_id] = {'progress': c + 1,
                                                  'total': len_of_task}
 
@@ -944,8 +945,6 @@ def clust(ctx: typer.Context,
                 else:
                     plot_mhp_clusters(trajectory_slices, option,
                                       lifetimes, False)
-            # plot_mhp_clusters(trajectory_slices, option,
-            #                   False, False)
 
 
 @ app.callback()
