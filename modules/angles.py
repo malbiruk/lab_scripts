@@ -61,7 +61,7 @@ def get_chl_tilt(trj: TrajectorySlice) -> None:
         print('done ✅\n')
 
 
-def break_tilt_into_components(ax: axes._subplots.Axes, trj: TrajectorySlice) -> None:
+def break_tilt_into_components(ax, trj: TrajectorySlice) -> None:
     '''
     break and plot tilt components for one trj slice
     '''

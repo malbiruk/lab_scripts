@@ -80,6 +80,13 @@ def main():
     final_df.to_csv(PATH / 'notebooks' / 'mhpmaps' / 'info_mhp_atoms_'
                     f'{trj_slices[0].b}-{trj_slices[0].e}-{trj_slices[0].dt}'
                     '_chol.csv', index=False)
+    mhp_df_mol = final_df.groupby(
+        ['index', 'system', 'CHL amount, %', 'timepoint', 'mol_ind'],
+        as_index=False)['mhp'].mean()
+    mhp_df_mol.to_csv(
+        PATH / 'notebooks' / 'mhpmaps' / 'info_mhp_atoms_'
+        f'{trj_slices[0].b}-{trj_slices[0].e}-{trj_slices[0].dt}'
+        '_chol_per_mol.csv', index=False)
 
 
 # %%

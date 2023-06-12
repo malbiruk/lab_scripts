@@ -1029,8 +1029,6 @@ def get(ctx: typer.Context,
     systems = flatten([(i, i + '_chol10', i + '_chol30', i + '_chol50')
                        for i in flatten(EXPERIMENTS.values())])
     systems = list(dict.fromkeys(systems))
-    removed_systems = ['popc_chol10', 'popc_chol30', 'popc_chol50']
-    systems = [s for s in systems if s not in removed_systems]
 
     trajectory_slices = [TrajectorySlice(System(PATH, s, trj, tpr), b, e, dt)
                          for s in systems]
@@ -1076,27 +1074,26 @@ def get(ctx: typer.Context,
 
     if 'dc_lip' in contact_types:
         logging.info('started intrabilayer contacts calculation')
-        multiproc(calculate_contacts,
-                  trajectory_slices_only_chl,
-                  ('CHOL' for _ in trajectory_slices_only_chl),
-                  (grp2_selectors),
-                  ('dc' for _ in trajectory_slices_only_chl),
-                  (0 for _ in trajectory_slices_only_chl),
-                  n_workers=n_workers,
-                  messages=messages,
-                  descr='intrabilayer contacts'
-                  )
-
         # multiproc(calculate_contacts,
         #           trajectory_slices_only_chl,
-        #           ('lip' for _ in trajectory_slices_only_chl),
-        #           (None for _ in trajectory_slices_only_chl),
+        #           ('CHOL' for _ in trajectory_slices_only_chl),
+        #           (grp2_selectors),
         #           ('dc' for _ in trajectory_slices_only_chl),
         #           (0 for _ in trajectory_slices_only_chl),
         #           n_workers=n_workers,
         #           messages=messages,
         #           descr='intrabilayer contacts'
         #           )
+        multiproc(calculate_contacts,
+                  trajectory_slices_only_chl,
+                  ('lip' for _ in trajectory_slices_only_chl),
+                  (None for _ in trajectory_slices_only_chl),
+                  ('dc' for _ in trajectory_slices_only_chl),
+                  (0 for _ in trajectory_slices_only_chl),
+                  n_workers=n_workers,
+                  messages=messages,
+                  descr='intrabilayer contacts'
+                  )
         logging.info('intrabilayer contacts calculation done')
         logging.info('')
 

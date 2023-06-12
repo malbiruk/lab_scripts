@@ -11,30 +11,30 @@
 
 # %%
 
-from integral_parameters_script import plot_violins
-from mpl_toolkits.mplot3d import Axes3D
-from sklearn.cluster import AgglomerativeClustering as AC
-from matplotlib.ticker import MaxNLocator
-from sklearn.mixture import GaussianMixture
-from scipy import stats
-from scipy import integrate
-from scipy.optimize import curve_fit
-import MDAnalysis as mda
-from MDAnalysis.analysis.leaflet import LeafletFinder
 import argparse
 import sys
 from pathlib import Path
+
+import matplotlib.pyplot as plt
+import MDAnalysis as mda
 import numpy as np
 import pandas as pd
-import matplotlib.pyplot as plt
 import seaborn as sns
-
+from integral_parameters_script import plot_violins
+from matplotlib.ticker import MaxNLocator
+from MDAnalysis.analysis.leaflet import LeafletFinder
 from modules import ndtest
-from modules.general import flatten, opener, sparkles, duration, chunker, get_keys_by_value
-from modules.traj import System, TrajectorySlice
+from modules.angles import chl_tilt_angle
+from modules.constants import EXPERIMENTS, PATH, TO_RUS
 from modules.density import plot_density_profile
-from modules.constants import PATH, TO_RUS, EXPERIMENTS
-from integral_parameters_script import chl_tilt_angle
+from modules.general import (chunker, duration, flatten, get_keys_by_value,
+                             opener, sparkles)
+from modules.traj import System, TrajectorySlice
+from mpl_toolkits.mplot3d import Axes3D
+from scipy import integrate, stats
+from scipy.optimize import curve_fit
+from sklearn.cluster import AgglomerativeClustering as AC
+from sklearn.mixture import GaussianMixture
 
 
 def add_comps_to_chl_tilt(path_to_df, b_comp=None, e_comp=None, dt_comp=None):
@@ -413,7 +413,7 @@ df = df.sort_values(by=['CHL amount, %', 'component'], ascending=[True, False])
 
 
 # %%
-fig, axs = plt.subplots(1,3,figsize=(23,7),sharey=True)
+fig, axs = plt.subplots(1, 3, figsize=(23, 7), sharey=True)
 for exp, ax in zip(EXPERIMENTS, axs):
     df1 = df[df['experiment'] == exp]
 
@@ -422,7 +422,7 @@ for exp, ax in zip(EXPERIMENTS, axs):
     y = 'α, °'
 
     g = sns.violinplot(data=df1, x=x, y=y, hue=hue,
-                   cut=0, palette='RdYlGn_r', inner='quartile', ax=ax)
+                       cut=0, palette='RdYlGn_r', inner='quartile', ax=ax)
     ax.set_title(exp)
     if ax != axs[-1]:
         g.legend_.remove()
@@ -430,7 +430,7 @@ for exp, ax in zip(EXPERIMENTS, axs):
         ax.set_ylabel('')
 
 plt.savefig(PATH / 'notebooks' / 'integral_parameters' / 'components' /
-             f'angle_components_{b_comp}-{e_comp}-{dt_comp}.png',
+            f'angle_components_{b_comp}-{e_comp}-{dt_comp}.png',
             bbox_inches='tight')
 
 
@@ -557,66 +557,85 @@ u = mda.Universe(f'{trj.system.dir}/md/md.tpr',
 
 u.dimensions
 
+
 # %%
-syst = 'dops_chol10'
+def plot_comps(syst: str, ax, n_comps: int = 4):
+    lines = opener(PATH / 'notebooks' / 'chol_tilt' /
+                   f'{syst}_100-200-100_tilt.xvg')
+    a = list(map(float, flatten([i.split()[1:] for i in lines])))
+    a = np.array([i if i <= 90 else i - 180 for i in a])
 
-fig, ax = plt.subplots()
-lines = opener(PATH / 'notebooks' / 'chol_tilt' /
-               f'{syst}_100-200-100_tilt.xvg')
+    def func(x, *params):
+        y = np.zeros_like(x)
+        for i in range(0, len(params), 3):
+            ctr = params[i]
+            amp = params[i + 1]
+            wid = params[i + 2]
+            y = y + amp * np.exp(-((x - ctr) / wid)**2)
+        return y
 
-a = list(map(float, flatten([i.split()[1:] for i in lines])))
-a = np.array([i if i <= 90 else i - 180 for i in a])
+    x = np.arange(np.min(a), np.max(a),
+                  (np.max(a) - np.min(a)) / 500)
+    my_kde = sns.kdeplot(a,
+                         ax=ax,
+                         # fill=False,
+                         lw=0,
+                         color='black',
+                         # element='poly',
+                         # stat='density',
+                         bw_adjust=0.4,
+                         cut=0
+                         )
+    line = my_kde.lines[0]
+    x, y = line.get_data()
+
+    if n_comps == 4:
+        guess = [-20, 0.005, 10, -15, 0.02, 7, 10, 0.02, 7, 20, 0.005, 10]
+    elif n_comps == 2:
+        guess = [-30, 0.005, 20, 30, 0.005, 20]
+
+    popt, _, _, _, _ = curve_fit(func, x, y, p0=guess, full_output=True)
+    df = pd.DataFrame(popt.reshape(int(len(guess) / 3), 3),
+                      columns=['ctr', 'amp', 'wid'])
+    df['area'] = df.apply(lambda row: integrate.quad(func, np.min(
+        x), np.max(x), args=(row['ctr'], row['amp'], row['wid']))[0], axis=1)
+    fit = func(x, *popt)
+
+    sns.histplot(a,
+                 # fill=False,
+                 ax=ax,
+                 lw=0,
+                 element='poly',
+                 stat='density',
+                 alpha=0.2,
+                 edgecolor='black'
+                 )
+
+    ax.plot(x, fit, '-k', lw=2)
+    if n_comps == 4:
+        ax.plot(x, func(x, *popt[:3]), '--')
+        ax.plot(x, func(x, *popt[3:6]), '--')
+        ax.plot(x, func(x, *popt[6:9]), '--')
+        ax.plot(x, func(x, *popt[9:]), '--')
+    elif n_comps == 2:
+        ax.plot(x, func(x, *popt[:3]), '--')
+        ax.plot(x, func(x, *popt[3:6]), '--')
+    ax.set_xlabel('ɑ, °')
+    ax.set_title(f'{syst}, {n_comps} components')
+    ks_stat, p_val = stats.kstest(y, func(x, *popt))
+
+# %%
+syst = 'popc_chol10'
+
+fig, axs = plt.subplots(1, 2, figsize=(14, 7), sharex=True, sharey=True)
+ks2 = plot_comps(syst, axs[0], 2)
+ks4 = plot_comps(syst, axs[1], 4)
 
 
-def func(x, *params):
-    y = np.zeros_like(x)
-    for i in range(0, len(params), 3):
-        ctr = params[i]
-        amp = params[i + 1]
-        wid = params[i + 2]
-        y = y + amp * np.exp(-((x - ctr) / wid)**2)
-    return y
-
-
-x = np.arange(np.min(a), np.max(a),
-              (np.max(a) - np.min(a)) / 500)
-my_kde = sns.kdeplot(a,
-                     ax=ax,
-                     # fill=False,
-                     lw=0,
-                     color='black',
-                     # element='poly',
-                     # stat='density',
-                     bw_adjust=0.4,
-                     cut=0
-                     )
-line = my_kde.lines[0]
-x, y = line.get_data()
-
-guess = [-20, 0.005, 10, -15, 0.02, 7, 10, 0.02, 7, 20, 0.005, 10]
-
-popt, _, _, _, _ = curve_fit(func, x, y, p0=guess, full_output=True)
-df = pd.DataFrame(popt.reshape(int(len(guess) / 3), 3),
-                  columns=['ctr', 'amp', 'wid'])
-df['area'] = df.apply(lambda row: integrate.quad(func, np.min(
-    x), np.max(x), args=(row['ctr'], row['amp'], row['wid']))[0], axis=1)
-fit = func(x, *popt)
-sns.histplot(a,
-             # fill=False,
-             ax=ax,
-             lw=0,
-             element='poly',
-             stat='density',
-             alpha=0.2,
-             edgecolor='black'
-             )
-
-ax.plot(x, fit, '-k', lw=2)
-ax.plot(x, func(x, *popt[:3]), '--')
-ax.plot(x, func(x, *popt[3:6]), '--')
-ax.plot(x, func(x, *popt[6:9]), '--')
-ax.plot(x, func(x, *popt[9:]), '--')
-
+# %%
+ks2
+# %%
+ks4
 # %%
 
 
@@ -657,7 +676,6 @@ def break_tilt_into_components(ax, trj: TrajectorySlice) -> None:
     line = my_kde.lines[0]
     x, y = line.get_data()
 
-    guess = [-20, 0.005, 10, -15, 0.02, 7, 10, 0.02, 7, 20, 0.005, 10]
     try:
         popt, _, _, _, _ = curve_fit(func, x, y, p0=guess, full_output=True)
         df = pd.DataFrame(popt.reshape(int(len(guess) / 3), 3),
@@ -678,14 +696,14 @@ def break_tilt_into_components(ax, trj: TrajectorySlice) -> None:
                      )
 
         ax.plot(x, fit, '-k', lw=2)
-        ax.plot(x, func(x, *popt[:3]), '--')
-        ax.plot(x, func(x, *popt[3:6]), '--')
-        ax.plot(x, func(x, *popt[6:9]), '--')
-        ax.plot(x, func(x, *popt[9:]), '--')
-
-        df.to_csv(
-            f'{trj.system.path}/notebooks/chol_tilt/'
-            f'{trj.system.name}_{trj.b}-{trj.e}-{trj.dt}_4_comps.csv', index=False)
+        if n_comps == 4:
+            ax.plot(x, func(x, *popt[:3]), '--')
+            ax.plot(x, func(x, *popt[3:6]), '--')
+            ax.plot(x, func(x, *popt[6:9]), '--')
+            ax.plot(x, func(x, *popt[9:]), '--')
+        elif n_comps == 2:
+            ax.plot(x, func(x, *popt[:3]), '--')
+            ax.plot(x, func(x, *popt[3:6]), '--')
 
     except RuntimeError as e:
         print(f'couldn\'t curve_fit for {trj.system}: ', e)

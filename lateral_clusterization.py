@@ -94,7 +94,7 @@ def obtain_pl_coords(trj_slices: list) -> None:
               f'{trj_slices[0].dt}_coords.csv')
 
 
-def perform_pbc_clusterization(df: pd.DataFrame, x='x_o', y='y_o',
+def perform_pbc_clusterization(df: pd.DataFrame, x='x_o', y='y_o', z='z_o',
                                box='x_box', thresh: int = 6) -> pd.DataFrame:
     '''
     Single linkage geometric clusterization by distance threshold
@@ -103,14 +103,19 @@ def perform_pbc_clusterization(df: pd.DataFrame, x='x_o', y='y_o',
     L - box size (for pbc)
     thresh - distance threshold
     '''
-    xy = np.hstack((df[x].values[:, None], df[y].values[:, None]))
+    # pylint: disable = too-many-arguments
+
+    xyz = np.hstack((df[x].values[:, None],
+                     df[y].values[:, None],
+                     df[z].values[:, None]))
     box_side = df.iloc[0][box]
 
-    for d in range(xy.shape[1] - 1):
+    for d in range(xyz.shape[1]):
         # find all 1-d distances
-        pd_ = pdist(xy[:, d].reshape(xy.shape[0], 1))
+        pd_ = pdist(xyz[:, d].reshape(xyz.shape[0], 1))
         # apply boundary conditions
-        pd_[pd_ > box_side * 0.5] -= box_side
+        if d < 2:
+            pd_[pd_ > box_side * 0.5] -= box_side
         try:
             # sum
             total += pd_**2
@@ -129,7 +134,8 @@ def perform_pbc_clusterization(df: pd.DataFrame, x='x_o', y='y_o',
 
 
 def obtain_cluster_labels(trj_slices: list, mol: str = 'CHL',
-                          thresh: int = 6, x: str = 'x_o', y: str = 'y_o',
+                          thresh: int = 6,
+                          x: str = 'x_o', y: str = 'y_o', z: str = 'z_o',
                           b_comp=100, e_comp=200, dt_comp=100) -> None:
     '''
     perform clusterization for each point of _coords_with_comps.csv df columns
@@ -139,6 +145,7 @@ def obtain_cluster_labels(trj_slices: list, mol: str = 'CHL',
     thresh -- threshold for clusterization (A)
     x, y - columns of coords for clusterization
     '''
+    # pylint: disable = too-many-arguments
 
     if mol == 'CHL':
         if not (PATH / 'notebooks' / 'integral_parameters' /
@@ -168,7 +175,7 @@ def obtain_cluster_labels(trj_slices: list, mol: str = 'CHL',
     all_counts = df.groupby(
         ['system', 'CHL amount, %', 'timepoint', 'monolayer'],
         as_index=False, group_keys=False).apply(
-        perform_pbc_clusterization, x=x, y=y, thresh=thresh)
+        perform_pbc_clusterization, x=x, y=y, z=z, thresh=thresh)
     rich.print('saving results...')
     all_counts.to_csv(PATH / 'notebooks' / 'gclust' /
                              f'{mol}_clusters_'
@@ -179,7 +186,7 @@ def obtain_cluster_labels(trj_slices: list, mol: str = 'CHL',
 
 
 def plot_cluster_sizes(trj_slices: list, mol: str,
-                       thresh=3, max_clsize=70) -> None:
+                       thresh=3, max_clsize=None) -> None:
     '''
     trj_slices -- list of TrajectorySlice() objects
     mol -- molecule, which clusters are analyzed, should be CHL or PL
@@ -194,34 +201,34 @@ def plot_cluster_sizes(trj_slices: list, mol: str,
     df2 = all_counts.groupby(
         ['timepoint', 'system', 'CHL amount, %', 'monolayer']).agg(
         cluster_size=('label', 'value_counts')).reset_index()
-    palette = sns.color_palette('RdYlGn_r', 4)
     rich.print('plotting...')
     for exp, _ in EXPERIMENTS.items():
         fig, axs = plt.subplots(1, 3, figsize=(
             24, 7), sharex=True, sharey=True)
         for syst, ax in zip(EXPERIMENTS[exp], axs):
-            hists = {}
-            for chol_amount in df2['CHL amount, %'].unique():
-                hists[chol_amount] = np.histogram(
-                    df2[(df2['system'] == syst) &
-                        (df2['CHL amount, %'] == chol_amount)]['cluster_size'],
-                    bins=np.arange(1, max_clsize, 4), density=True)
-            width = 1
-            ax.bar(hists[0][1][:-1] - width, hists[0][0], color=palette[0],
-                   width=width, ec='k', label='0% of CHL')
-            ax.bar(hists[10][1][:-1], hists[10][0], color=palette[1],
-                   width=width, ec='k', label='10% of CHL')
-            ax.bar(hists[30][1][:-1] + width, hists[30][0], color=palette[2],
-                   width=width, ec='k', label='30% of CHL')
-            ax.bar(hists[50][1][:-1] + 2 * width, hists[50][0],
-                   color=palette[3],
-                   width=width, ec='k', label='50% of CHL')
-            # ax.set_xlim(left=0)
+            subdf = df2[(df2['system'] == syst)].copy()
+            # FIXME: dirty fix cluster sizes up to 200 in dopc and dppc_325
+            if syst in ['dopc', 'dppc_325']:
+                subdf['cluster_size'] = subdf['cluster_size'] / 2
+
+            sns.histplot(data=subdf, x='cluster_size',
+                         ax=ax, hue='CHL amount, %',
+                         palette='RdYlGn_r', common_norm=False,
+                         # fill=True, cut=0, bw_adjust=1,
+                         stat='density',
+                         binwidth=2, multiple='dodge',
+                         edgecolor='black', linewidth=2,
+                         legend=ax == axs[-1])
+
             ax.set_xlabel('Cluster size (n of molecules)')
             ax.set_title(syst)
-            # ax.set_yscale('log')
-        axs[0].set_ylabel('Density')
-        axs[1].legend(loc='lower center', ncol=4, bbox_to_anchor=(0.5, -.32))
+            ax.set_xlim(0, max_clsize)
+        fig.suptitle(f'{exp}, threshold={thresh} Å')
+        fig.savefig(PATH / 'notebooks' / 'gclust' /
+                    str(f'{mol}_clusters_{trj_slices[0].b}-{trj_slices[0].e}-'
+                        f'{trj_slices[0].dt}_thresh_{thresh}'
+                        + '_'.join(exp.split()) + '.png'),
+                    bbox_inches='tight')
         fig.suptitle(f'{exp}, threshold={thresh} Å')
         fig.savefig(PATH / 'notebooks' / 'gclust' /
                     str(f'{mol}_clusters_{trj_slices[0].b}-{trj_slices[0].e}-'
@@ -846,6 +853,8 @@ def main():
                         help='name of x coordinate')
     parser.add_argument('-y', '--y', type=str, default='y_o',
                         help='name of y coordinate')
+    parser.add_argument('-z', '--z', type=str, default='z_o',
+                        help='name of y coordinate')
     parser.add_argument('-t', '--thresh', type=int, default=6,
                         help='threshold of clusterization (A), default=6')
     parser.add_argument('-b', '--b', type=int, default=199,
@@ -880,7 +889,7 @@ def main():
 
     if args.obtain_cluster_labels:
         obtain_cluster_labels(trj_slices, args.molecule,
-                              args.thresh, args.x, args.y,
+                              args.thresh, args.x, args.y, args.z,
                               b_comp, e_comp, dt_comp)
 
     if args.plot_cluster_sizes_with_components:
