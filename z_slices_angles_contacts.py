@@ -280,9 +280,9 @@ def calculate_chol_surface_exposure_comps(trj_slices: list) -> None:
     fname = (PATH / 'notebooks' / 'mhpmaps' /
              'chol_from_all_fractions_comps_stats_'
              f'{trj_slices[0].b}-{trj_slices[0].e}-{trj_slices[0].dt}.csv')
-    if fname.is_file():
-        logging.info('chol fractions of surface already calculated')
-        return
+    # if fname.is_file():
+    #     logging.info('chol fractions of surface already calculated')
+    #     return
 
     logging.info('loading data...')
     df = pd.read_csv(PATH / 'notebooks' / 'mhpmaps' / 'info_mhp_atoms_'
@@ -408,8 +408,8 @@ def calculate_chol_mhp_fractions_comps(trj_slices: list) -> None:
              'for_hists_fractions_stats_chol_comps_'
              f'{trj_slices[0].b}-{trj_slices[0].e}-'
              f'{trj_slices[0].dt}.csv')
-    if fname.is_file():
-        return
+    # if fname.is_file():
+    #     return
 
     logging.info('preprocessing data...')
     df = pd.read_csv(
@@ -546,8 +546,8 @@ def contacts_to_single_tables(trj_slices: list) -> None:
             PATH / 'notebooks' / 'contacts' /
             f'{pr}_{trj_slices[0].b}-{trj_slices[0].e}-{trj_slices[0].dt}'
             '_rchist_full.csv')
-        if fname.is_file():
-            return
+        # if fname.is_file():
+        #     return
         logging.info('saving %s contacts data...', pr)
 
         dfs = []
@@ -576,9 +576,9 @@ def create_chl_angle_z_mhp_table_for_contacts(trj_slices: list,
              f'{trj_slices[0].b}-{trj_slices[0].e}-{trj_slices[0].dt}'
              '_rchist_full.csv')
 
-    if fname.is_file():
-        logging.info('%s already preprocessed, skipping...', pr)
-        return
+    # if fname.is_file():
+    #     logging.info('%s already preprocessed, skipping...', pr)
+    #     return
 
     logging.info('%s: preprocessing angle_mhp_z table...', pr)
     angle_mhp_z = pd.read_csv(
@@ -650,9 +650,9 @@ def merge_hb_or_dc_tables(trj_slices: list, hbonds: bool):
              f'{postfix}_chl_angle_z_mhp_'
              f'{trj_slices[0].b}-{trj_slices[0].e}-{trj_slices[0].dt}.csv')
 
-    if fname.is_file():
-        logging.info('loading %s data...', postfix)
-        return postfix, pd.read_csv(fname, low_memory=False)
+    # if fname.is_file():
+    #     logging.info('loading %s data...', postfix)
+    #     return postfix, pd.read_csv(fname, low_memory=False)
 
     logging.info('preprocessing %s data...', postfix)
 
@@ -728,6 +728,7 @@ def plot_contacts_per_chl_mol_by_hue(trj_slices: list,
                     (table_with_probs['CHL amount, %'] == chl_amount)]
                 sns.barplot(data=data,
                             x='other_name', y='n contacts per molecule',
+                            order=['CHL', 'PL', 'SOL'],
                             hue=hue, hue_order=order, ax=axs[c],
                             edgecolor='k', palette=palette, ci='sd'
                             )
@@ -1036,85 +1037,36 @@ if __name__ == '__main__':
 #     200.0, 201.0, 1) for s in systems]
 #
 # trj = trj_slices[10]
+
+# %% RDF
+# systs = ['popc_chol10', 'popc_chol30', 'popc_chol50']
+# syst=systs[0]
 #
-# %% surface CHL mhp fractions with components
-# angle_mhp_z = pd.read_csv(
-#     PATH / 'notebooks' / 'integral_parameters' /
-#     'angle_mhp_z_'
-#     f'{trj_slices[0].b}-{trj_slices[0].e}-{trj_slices[0].dt}.csv')
-#
-# angle_mhp_z['α, °'] = angle_mhp_z['α, °'].abs()
-# angle_mhp_z['surface'] = angle_mhp_z['surface'].map({1: 'yes', 0: 'no'})
-#
-# systs = ['popc']
 # fig, axs = plt.subplots(1, 3, figsize=(20, 7),
 #                         sharex=True, sharey=True)
-# axs = axs.flatten()
-# c = 0
-# for syst in systs:
-#     for chl_amount in [10, 30, 50]:
-#         data = angle_mhp_z[
-#             (angle_mhp_z['system'] == syst) &
-#             (angle_mhp_z['CHL amount, %'] == chl_amount)]
-#         sns.kdeplot(data=data, x='α, °',
-#                     hue='surface',
-#                     hue_order=['no','yes'],
-#                     ax=axs[c], fill=True,
-#                     common_norm=False, legend=c == 1)
-#         axs[c].set_title(f'{syst}, {chl_amount} % CHL')
-#         data = data[data['surface'] == 1]
-#         c += 1
-#
-# sns.move_legend(axs[1], loc='upper center',
-#                 bbox_to_anchor=(0.5, -0.2), ncol=6)
-# #
-# #
-# # # %%
-# fig.savefig(
-#     PATH / 'notebooks' / 'chol_tilt' / 'surface_z' /
-#     'surface_angles_'
-#     f'popc_'
-#     f'dt{trj_slices[0].dt}.png',
-#     bbox_inches='tight', dpi=300)
+# for ax, syst in zip(axs, systs):
+#     df_n = pd.read_csv(PATH / syst / 'a' / 'N_rdf.csv')
+#     df_p = pd.read_csv(PATH / syst / 'a' / 'P_rdf.csv')
+#     ax.plot(df_n['# r'], df_n['g'], label='N')
+#     ax.plot(df_p['# r'], df_p['g'], label='P')
+#     ax.set_xlabel('distance to CHL O, Å')
+#     sname, chl = syst.split('_chol', 1)
+#     ax.set_title(f'{sname}, {chl}% CHL')
+# axs[0].set_ylabel('g(r)')
+# axs[1].legend(loc='upper center', bbox_to_anchor=(0.5, -0.15), ncol=3)
 #
 #
 # # %%
-# angle_mhp_z = pd.read_csv(
-#     PATH / 'notebooks' / 'integral_parameters' /
-#     'angle_mhp_z_'
-#     f'{trj_slices[0].b}-{trj_slices[0].e}-{trj_slices[0].dt}.csv')
+# fig.savefig(PATH / 'notebooks' / 'rdf' / 'popc_P_N_chl_O.png',
+# bbox_inches='tight', dpi=300)
+
+
+# # %%
+# df = pd.read_csv(PATH / 'notebooks' / 'integral_parameters' /
+#                  'angle_mhp_z_'
+#                  f'{trj_slices[0].b}-{trj_slices[0].e}-{trj_slices[0].dt}.csv')
 #
-# angle_mhp_z['distance to bilayer center, Å'] = pd.cut(
-#     angle_mhp_z['distance to bilayer center'],
-#     bins=[0, 3, 6, 9, 12, 15, 100],
-#     labels=['<= 3', '3-6', '6-9', '9-12', '12-15', '> 15'])
-# angle_mhp_z['α, °'] = angle_mhp_z['α, °'].abs()
 #
-# systs = ['popc']
-# fig, axs = plt.subplots(1, 3, figsize=(20, 7),
-#                         sharex=True, sharey=True)
-# c = 0
-# for syst in systs:
-#     for chl_amount in [10, 30, 50]:
-#         data = angle_mhp_z[
-#             (angle_mhp_z['system'] == syst) &
-#             (angle_mhp_z['CHL amount, %'] == chl_amount)]
-#         sns.kdeplot(data=data, x='α, °',
-#                     hue='distance to bilayer center, Å',
-#                     ax=axs.flatten()[c], palette='crest_r', fill=True,
-#                     common_norm=False, legend=c == 1)
-#         axs.flatten()[c].set_title(f'{syst}, {chl_amount} % CHL')
-#         data = data[data['surface'] == 1]
-#         c += 1
-#
-# sns.move_legend(axs.flatten()[1], loc='upper center',
-#                 bbox_to_anchor=(0.5, -0.2), ncol=6)
-# #
-# #
-# # # %%
-# fig.savefig(
-#     PATH / 'notebooks' / 'chol_tilt' / 'surface_z' /
-#     'z_slices_angles_'
-#     f'popc_'
-#     f'dt{trj_slices[0].dt}.png',
-#     bbox_inches='tight', dpi=300)
+# # %%
+# df[df['system'] == 'dops'].groupby(
+#     ['system', 'CHL amount, %'], as_index=False)['timepoint'].nunique()

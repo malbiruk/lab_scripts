@@ -43,6 +43,11 @@ def calculate_contacts(trj: TrajectorySlice, grp1: str, grp2: str,
         grp2_name = grp2 if '/' not in grp2 else grp2_name.replace('|', '')
         grp2_name = grp2_name + '_'
 
+    if (Path(trj.system.dir) / 'contacts' /
+        f'{grp1}_{grp2_name + contact_type}_{contact_type}_rcnames.csv'
+        ).is_file():
+        return True
+
     args = f'''
 TOP={trj.system.dir}/md/{trj.system.tpr}
 TRJ={trj.system.dir}/md/{trj.system.xtc}
@@ -349,8 +354,8 @@ def plot_hb_lt_distr_single_interaction(progress: dict, task_id: int,
                  f'{trj_slices[0].b}-{trj_slices[0].e}-'
                  f'{trj_slices[0].dt}.png')
 
-        # if fname.is_file():
-        #     continue
+        if fname.is_file():
+            continue
 
         fig, axs = plt.subplots(1, 3, figsize=(20, 7),
                                 sharey=True, sharex=True)
@@ -450,8 +455,8 @@ def retrieve_chl_chl_over_lip_lip_ratios(trj_slices: list) -> None:
              f'{trj_slices[0].b}-{trj_slices[0].e}-'
              f'{trj_slices[0].dt}.csv')
 
-    # if fname.is_file():
-    #     return
+    if fname.is_file():
+        return
 
     logging.info('retrieving ratios...')
     to_df = []
@@ -547,8 +552,8 @@ def retrieve_pl_pl_over_lip_lip_ratios(trj_slices: list) -> None:
              f'{trj_slices[0].b}-{trj_slices[0].e}-'
              f'{trj_slices[0].dt}.csv')
 
-    # if fname.is_file():
-    #     return
+    if fname.is_file():
+        return
 
     logging.info('retrieving ratios...')
     to_df = []
@@ -644,8 +649,8 @@ def retrieve_chl_pl_over_lip_lip_ratios(trj_slices: list) -> None:
              f'{trj_slices[0].b}-{trj_slices[0].e}-'
              f'{trj_slices[0].dt}.csv')
 
-    # if fname.is_file():
-    #     return
+    if fname.is_file():
+        return
 
     logging.info('retrieving ratios...')
     to_df = []
@@ -1004,11 +1009,11 @@ def plot(ctx: typer.Context,
     if dcontacts:
         # retrieve_chl_lip_over_lip_lip_ratios(trajectory_slices_only_chl)
         # plot_chl_lip_over_lip_lip_ratios(trajectory_slices_only_chl)
-        # retrieve_chl_chl_over_lip_lip_ratios(trajectory_slices_only_chl)
+        retrieve_chl_chl_over_lip_lip_ratios(trajectory_slices_only_chl)
         plot_chl_chl_over_lip_lip_ratios(trajectory_slices_only_chl)
-        # retrieve_pl_pl_over_lip_lip_ratios(trajectory_slices_only_chl)
+        retrieve_pl_pl_over_lip_lip_ratios(trajectory_slices_only_chl)
         plot_pl_pl_over_lip_lip_ratios(trajectory_slices_only_chl)
-        # retrieve_chl_pl_over_lip_lip_ratios(trajectory_slices_only_chl)
+        retrieve_chl_pl_over_lip_lip_ratios(trajectory_slices_only_chl)
         plot_chl_pl_over_lip_lip_ratios(trajectory_slices_only_chl)
 
 

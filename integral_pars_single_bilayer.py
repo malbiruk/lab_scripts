@@ -119,15 +119,10 @@ def main():
     sns.set(style='ticks', context='talk', palette='muted')
 
     trj_slices = [TrajectorySlice(
-        System(PATH, syst), 150, 200, 1000)
+        System(PATH, syst, 'pbcmol_201.xtc', '201_ns.tpr'), 150, 200, 1000)
         for syst in ['popc'] + [f'popc_chol{i}' for i in range(10, 90, 20)]]
 
-    # print('obtain all densities...')
-    # multiproc(get_densities, trj_slices, n_workers=len(trj_slices))
-    # print('done.')
-    #
-    # for par in ['thickness', 'area_per_lipid', 'scd']:
-    #     get_data(par, trj_slices)
+    initialize_logging('relief.log')
 
     create_plot()
 

@@ -592,7 +592,7 @@ def plot_comps(syst: str, ax, n_comps: int = 4):
     if n_comps == 4:
         guess = [-20, 0.005, 10, -15, 0.02, 7, 10, 0.02, 7, 20, 0.005, 10]
     elif n_comps == 2:
-        guess = [-30, 0.005, 20, 30, 0.005, 20]
+        guess = [-20, 0.005, 10, 20, 0.005, 10]
 
     popt, _, _, _, _ = curve_fit(func, x, y, p0=guess, full_output=True)
     df = pd.DataFrame(popt.reshape(int(len(guess) / 3), 3),
@@ -621,16 +621,30 @@ def plot_comps(syst: str, ax, n_comps: int = 4):
         ax.plot(x, func(x, *popt[:3]), '--')
         ax.plot(x, func(x, *popt[3:6]), '--')
     ax.set_xlabel('ɑ, °')
-    ax.set_title(f'{syst}, {n_comps} components')
+    if n_comps == 4:
+        ax.set_title(f'{syst}, 2 components')
+    elif n_comps == 2:
+        ax.set_title(f'{syst}, 1 component')
     ks_stat, p_val = stats.kstest(y, func(x, *popt))
+    ax.text(0.62, 0.88,
+            f'KS stat={round(ks_stat,3)}\np-value={"%.1E" % p_val}',
+            size=15, transform=ax.transAxes)
+
 
 # %%
-syst = 'popc_chol10'
+syst = 'dops'
 
-fig, axs = plt.subplots(1, 2, figsize=(14, 7), sharex=True, sharey=True)
-ks2 = plot_comps(syst, axs[0], 2)
-ks4 = plot_comps(syst, axs[1], 4)
+fig, axs = plt.subplots(3, 2, figsize=(14, 21), sharex=True, sharey=True)
+axs = axs.flatten()
 
+for c, i in enumerate([10, 30, 50]):
+    plot_comps(f'{syst}_chol{i}', axs[c * 2], 2)
+    plot_comps(f'{syst}_chol{i}', axs[c * 2 + 1], 4)
+
+
+# %%
+fig.savefig(PATH / 'notebooks' / 'chol_tilt' / f'{syst}_comps_comparison.png',
+            bbox_inches='tight', dpi=300)
 
 # %%
 ks2

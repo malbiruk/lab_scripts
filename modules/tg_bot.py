@@ -50,8 +50,8 @@ def run_or_send_error(cmd: str, msg: str, **kwargs) -> bool:
         return True
     except subprocess.CalledProcessError as e:
         res = subprocess.run(cmd, shell=True, check=False, capture_output=True)
-        send_message('*' + msg + ':*\n`' +
-                     res.stderr.decode("utf-8") + '`', silent=True)
+        # send_message('*' + msg + ':*\n`' +
+        #              res.stderr.decode("utf-8") + '`', silent=True)
         rich.print(e, '\n')
         rich.print(res.stderr.decode("utf-8"))
         return False

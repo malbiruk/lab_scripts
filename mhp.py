@@ -28,7 +28,8 @@ from scipy import stats
 app = typer.Typer(rich_markup_mode='rich', add_completion=False)
 
 
-def obtain_mhpmap(trj: TrajectorySlice, force: bool = False) -> bool:
+def obtain_mhpmap(trj: TrajectorySlice, force: bool = False,
+                  resolution: int = 150) -> bool:
     '''
     obtain mhp map for specified trajectory slice
     '''
@@ -37,7 +38,8 @@ def obtain_mhpmap(trj: TrajectorySlice, force: bool = False) -> bool:
 
     if desired_datafile.is_file() and force is False:
         logging.info(
-            'data for %s already calculated, skipping...', trj.system.name)
+            'mhp data for %s already calculated, skipping...',
+            trj.system.name)
         return True
 
     (PATH / trj.system.name / f'mhp_{trj.b}-{trj.e}-{trj.dt}').mkdir(
@@ -48,7 +50,7 @@ def obtain_mhpmap(trj: TrajectorySlice, force: bool = False) -> bool:
 
     args = f'TOP={str(tpr)}\nTRJ={str(xtc)}' \
         f'\nBEG={int(trj.b*1000)}\nEND={int(trj.e*1000)}\nDT={trj.dt}' \
-        '\nNX=150\nNY=150' \
+        f'\nNX={resolution}\nNY={resolution}' \
         f'\nMAPVAL="M"\nMHPTBL="98"\nPRJ="P"\nUPLAYER=1\nMOL="lip///"' \
         '\nSURFSEL=$MOL\nPOTSEL=$MOL\nDUMPDATA=1\nNOIMG=1'
 
@@ -226,6 +228,7 @@ def plot_mhp_area_single_exp(ax: plt.axis, df: pd.DataFrame, exp: str,
 
     x = np.arange(len(EXPERIMENTS[exp]))
     ax.set_title(exp)
+    ax.set_ylim(0)
     ax.xaxis.set_ticks(x)
     ax.set_xticklabels(EXPERIMENTS[exp])
 
@@ -258,6 +261,7 @@ def plot_mhp_ratio_all(trj_slices, chol: bool = False):
         ax.set_xticks(ticks)
         ax.set_xticklabels(labels, rotation=45,
                            ha='right', rotation_mode='anchor')
+        ax.set_ylim(0, df.phil.max()+df.phil_std.max())
     axs[0].set_ylabel('% of area')
     fig.legend(loc='upper center', bbox_to_anchor=(0.5, -0.1), ncol=n)
 
@@ -400,7 +404,7 @@ def get_detailed_mhp_data(trj_slices: list) -> None:
     with progress_bar as p:
         overall_task = p.add_task('system', total=len(trj_slices))
         for trj in trj_slices:
-            prefix = PATH / trj.system.name / 'mhp_200.0-201.0-1'
+            prefix = PATH / trj.system.name / f'mhp_{trj.b}-{trj.e}-{trj.dt}'
             at_info = np.load(prefix / '1_pa.nmp')['data']
             mapp = np.load(prefix / '1_data.nmp')['data']
 
@@ -790,9 +794,10 @@ def plot_mhp_hists_single_exp(progress: dict, task_id: int,
     exp -- key from EXPERIMENTS dict
     '''
 
-    len_of_task = len(EXPERIMENTS[exp])
+    len_of_task = len(EXPERIMENTS[exp] * 2)
     fig, axs = plt.subplots(1, 3, figsize=(20, 7), sharex=True, sharey=True)
-    for c, (ax, syst) in enumerate(zip(axs, EXPERIMENTS[exp])):
+    c = 0
+    for ax, syst in zip(axs, EXPERIMENTS[exp]):
         data = df[df['system'] == syst]
         sns.kdeplot(data=data, x='mhp', hue='CHL amount, %', ax=ax,
                     legend=ax == axs[-1], palette='RdYlGn_r',
@@ -802,11 +807,35 @@ def plot_mhp_hists_single_exp(progress: dict, task_id: int,
         ax.set_title(syst)
         progress[task_id] = progress[task_id] = {'progress': c + 1,
                                                  'total': len_of_task}
+        c += 1
 
     fig.suptitle(exp)
     fig.savefig(
         PATH / 'notebooks' / 'mhpmaps' / 'imgs' /
         f'{"_".join(exp.split())}_mhp_values_kde_'
+        f'{trj_slices[0].b}-{trj_slices[0].e}-'
+        f'{trj_slices[0].dt*10}.png',
+        bbox_inches='tight', dpi=300)
+
+    fig, axs = plt.subplots(1, 3, figsize=(20, 7), sharex=True, sharey=True)
+    for ax, syst in zip(axs, EXPERIMENTS[exp]):
+        data = df[(df['system'] == syst)
+                  & (df['mol_name'] == 'CHL')
+                  & (df['CHL amount, %'] != 0)]
+        sns.kdeplot(data=data, x='mhp', hue='CHL amount, %', ax=ax,
+                    legend=ax == axs[-1], palette='crest_r',
+                    common_norm=False, fill=True, alpha=.2)
+        ax.axvline(-0.5, ls=':', c='k')
+        ax.axvline(0.5, ls=':', c='k')
+        ax.set_title(f'{syst}, only CHL')
+        progress[task_id] = progress[task_id] = {'progress': c + 1,
+                                                 'total': len_of_task}
+        c += 1
+
+    fig.suptitle(exp)
+    fig.savefig(
+        PATH / 'notebooks' / 'mhpmaps' / 'imgs' /
+        f'{"_".join(exp.split())}_chol_mhp_values_kde_'
         f'{trj_slices[0].b}-{trj_slices[0].e}-'
         f'{trj_slices[0].dt*10}.png',
         bbox_inches='tight', dpi=300)
@@ -896,7 +925,7 @@ def plot_mhp_hists(ctx: typer.Context):
     df = pd.read_csv(PATH / 'notebooks' / 'mhpmaps' / 'info_mhp_atoms_'
                      f'{trj_slices[0].b}-{trj_slices[0].e}-'
                      f'{trj_slices[0].dt*10}.csv',
-                     usecols=['system', 'CHL amount, %', 'mhp'])
+                     usecols=['system', 'CHL amount, %', 'mhp', 'mol_name'])
 
     logging.info('drawing plots...')
     multiproc(plot_mhp_hists_single_exp,
