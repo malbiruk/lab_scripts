@@ -79,8 +79,8 @@ def run_scd_py(trj: TrajectorySlice) -> None:
     if not Path(f'{trj.system.path}/notebooks/scd/'
                 f'{trj.system.name}_{trj.b}-{trj.e}-{trj.dt}_scd.csv').is_file():
         cmd = ['/nfs/belka2/soft/impulse/dev/inst/scd.py',
-               f'-f {trj.system.dir}/md/pbcmol.xtc',
-               f'-s {trj.system.dir}/md/md.tpr',
+               f'-f {trj.system.dir}/md/{trj.system.xtc}',
+               f'-s {trj.system.dir}/md/{trj.system.tpr}',
                f'-o {trj.system.path}/notebooks/scd/{trj.system.name}_{trj.b}-{trj.e}-{trj.dt}',
                f'-b {trj.b*1000} -e {trj.e*1000} --dt {trj.dt} --sel {trj.system.pl_selector()}']
         print(

@@ -15,7 +15,7 @@ import pandas as pd
 import seaborn as sns
 import typer
 from modules.constants import EXPERIMENTS, PATH
-from modules.general import (duration, flatten, get_keys_by_value,
+from modules.general import (flatten, get_keys_by_value,
                              initialize_logging, multiproc, progress_bar)
 from modules.tg_bot import run_or_send_error
 from modules.traj import System, TrajectorySlice
@@ -354,23 +354,28 @@ def plot_hb_lt_distr_single_interaction(progress: dict, task_id: int,
                  f'{trj_slices[0].b}-{trj_slices[0].e}-'
                  f'{trj_slices[0].dt}.png')
 
-        if fname.is_file():
-            continue
+        # if fname.is_file():
+        #     continue
 
         fig, axs = plt.subplots(1, 3, figsize=(20, 7),
                                 sharey=True, sharex=True)
         for syst, ax in zip(systs, axs):
             data = df[df['system'] == syst]
-            sns.histplot(data=data, x='lifetime, ps', alpha=.2,
-                         hue='CHL amount, %',
-                         palette='RdYlGn_r', stat='density', ax=ax,
-                         binwidth=.15, log_scale=True,
-                         legend=ax == axs[-1], common_norm=False,
-                         kde=True, line_kws={'lw': 5})
-            sns.kdeplot(data=data, x='lifetime, ps', lw=5,
-                        hue='CHL amount, %',
-                        palette='RdYlGn_r', ax=ax, common_norm=False,
-                        log_scale=True, legend=False)
+            try:
+                sns.histplot(data=data, x='lifetime, ps', alpha=.2,
+                             hue='CHL amount, %',
+                             palette='RdYlGn_r', stat='density', ax=ax,
+                             binwidth=.15, log_scale=True,
+                             legend=ax == axs[-1], common_norm=False)
+            except ValueError as e:
+                print(syst, str(e))
+            try:
+                sns.kdeplot(data=data, x='lifetime, ps', lw=3,
+                            hue='CHL amount, %',
+                            palette='RdYlGn_r', ax=ax, common_norm=False,
+                            log_scale=True, legend=False)
+            except np.linalg.LinAlgError as e:
+                print(syst, str(e))
             ax.set_title(syst)
         fig.suptitle(exp)
         fig.savefig(fname, bbox_inches='tight', dpi=300)
@@ -401,53 +406,9 @@ def plot_hb_lt_distributions(
     logging.info('done.')
 
 
-def retrieve_chl_lip_over_lip_lip_ratios(trj_slices: list) -> None:
-    '''
-    calculate ratios of n of CHL-PL contacts over all LIP-LIP contacts
-    in each frame
-    '''
-    fname = (PATH / 'notebooks' / 'contacts' /
-             f'chl_lip_over_lip_lip_ratios_'
-             f'{trj_slices[0].b}-{trj_slices[0].e}-'
-             f'{trj_slices[0].dt}.csv')
-
-    if fname.is_file():
-        return
-
-    dfs = []
-    for trj in trj_slices:
-        grp2 = (trj.system.pl_selector()[1:-4]
-                if 'dopc_dops50' not in trj.system.name
-                else trj.system.pl_selector(0)[1:-4]
-                + trj.system.pl_selector(1)[1:-6])
-
-        chl_lip = pd.read_csv(PATH / trj.system.name / 'contacts' /
-                              f'CHOL_{grp2}_dc_dc_ncr.csv',
-                              header=None, skiprows=1,
-                              names=['timepoint', 'CHL-PL'])
-        lip_lip = pd.read_csv(PATH / trj.system.name / 'contacts' /
-                              'lip_dc_dc_ncr.csv',
-                              header=None, skiprows=1,
-                              names=['timepoint', 'LIP-LIP'])
-
-        df = chl_lip.merge(lip_lip, on=['timepoint'])
-        c = {'index': trj.system.name,
-             'system': trj.system.name.split('_chol', 1)[0],
-             'CHL amount, %': trj.system.name.split('_chol', 1)[1]}
-        df = df.assign(**c)
-        columns_to_move = ['index', 'system', 'CHL amount, %']
-        new_columns = columns_to_move + [col for col in df.columns
-                                         if col not in columns_to_move]
-        df = df[new_columns]
-        dfs.append(df)
-    df_all = pd.concat(dfs, ignore_index=True)
-    df_all['CHL-PL / LIP-LIP, %'] = df_all['CHL-PL'] / df_all['LIP-LIP'] * 100
-    df_all.to_csv(fname, index=False)
-
-
 def retrieve_chl_chl_over_lip_lip_ratios(trj_slices: list) -> None:
     '''
-    calculate ratios of ft of CHL-CHL contacts over all LIP-LIP contacts
+    calculate ratios of dc lt of CHL-CHL contacts over all LIP-LIP contacts
     ci obtained using bootstrapping
     '''
     fname = (PATH / 'notebooks' / 'contacts' /
@@ -544,7 +505,7 @@ def plot_chl_chl_over_lip_lip_ratios(trj_slices: list) -> None:
 
 def retrieve_pl_pl_over_lip_lip_ratios(trj_slices: list) -> None:
     '''
-    calculate ratios of ft of CHL-CHL contacts over all LIP-LIP contacts
+    calculate ratios of dc lt of CHL-CHL contacts over all LIP-LIP contacts
     ci obtained using bootstrapping
     '''
     fname = (PATH / 'notebooks' / 'contacts' /
@@ -641,7 +602,7 @@ def plot_pl_pl_over_lip_lip_ratios(trj_slices: list) -> None:
 
 def retrieve_chl_pl_over_lip_lip_ratios(trj_slices: list) -> None:
     '''
-    calculate ratios of ft of CHL-PL contacts over all LIP-LIP contacts
+    calculate ratios of dc lt of CHL-PL contacts over all LIP-LIP contacts
     ci obtained using bootstrapping
     '''
     fname = (PATH / 'notebooks' / 'contacts' /
@@ -730,50 +691,6 @@ def plot_chl_pl_over_lip_lip_ratios(trj_slices: list) -> None:
                bbox_to_anchor=(0.5, 0), ncol=3)
     fig.savefig(PATH / 'notebooks' / 'contacts' / 'imgs' /
                 f'chl_pl_over_lip_lip_ratios_'
-                f'{trj_slices[0].b}-'
-                f'{trj_slices[0].e}-'
-                f'{trj_slices[0].dt}.png',
-                bbox_inches='tight')
-    logging.info('done.')
-
-
-def plot_chl_lip_over_lip_lip_ratios(trj_slices: list) -> None:
-    '''
-    plot ratios of CHL-PL contacts by distance and all LIP-LIP contacts
-    for all systems
-    '''
-    logging.info('plotting ratios...')
-
-    df = pd.read_csv(PATH / 'notebooks' / 'contacts' /
-                     f'chl_lip_over_lip_lip_ratios_'
-                     f'{trj_slices[0].b}-'
-                     f'{trj_slices[0].e}-'
-                     f'{trj_slices[0].dt}.csv')
-
-    df = df[df.columns.intersection(
-        ['system', 'experiment', 'CHL amount, %', 'CHL-PL / LIP-LIP, %'])]
-
-    df['experiment'] = df['system'].apply(
-        lambda x: get_keys_by_value(x, EXPERIMENTS))
-    df = df.explode('experiment')
-    order = {'dmpc': 0, 'dppc_325': 1, 'dspc': 2, 'popc': 3,
-             'dopc': 4, 'dopc_dops50': 5, 'dops': 6}
-    df = df.sort_values(by=['system'], key=lambda x: x.map(order))
-
-    g = sns.FacetGrid(df, col='experiment', height=7,
-                      aspect=0.75, sharex=False, dropna=True)
-    g.map_dataframe(sns.barplot, x='system', y='CHL-PL / LIP-LIP, %',
-                    hue='CHL amount, %', saturation=1, ci='sd',
-                    errwidth=2, capsize=.1,
-                    palette='RdYlGn_r', edgecolor='k', errcolor='k')
-    g.axes[0][1].legend(ncol=len(df['CHL amount, %'].unique()),
-                        title='CHL amount, %',
-                        loc='upper center', bbox_to_anchor=(0.5, -0.15))
-    # g.add_legend(title=legend_title)
-    g.set_titles(col_template='{col_name}')
-
-    plt.savefig(PATH / 'notebooks' / 'contacts' / 'imgs' /
-                f'chl_lip_over_lip_lip_ratios_'
                 f'{trj_slices[0].b}-'
                 f'{trj_slices[0].e}-'
                 f'{trj_slices[0].dt}.png',
@@ -988,7 +905,6 @@ def plot(ctx: typer.Context,
     '''
     plot contacts
     '''
-    # TODO: add средняя площадь экспонирования для каждой молекулы
     trj, tpr, b, e, dt, _, verbose, _ = ctx.obj
     sns.set(style='ticks', context='talk', palette='muted')
     initialize_logging('plot_contacts.log', verbose)
@@ -1007,8 +923,6 @@ def plot(ctx: typer.Context,
         plot_chl_lip_groups_hb(trajectory_slices_only_chl)
 
     if dcontacts:
-        # retrieve_chl_lip_over_lip_lip_ratios(trajectory_slices_only_chl)
-        # plot_chl_lip_over_lip_lip_ratios(trajectory_slices_only_chl)
         retrieve_chl_chl_over_lip_lip_ratios(trajectory_slices_only_chl)
         plot_chl_chl_over_lip_lip_ratios(trajectory_slices_only_chl)
         retrieve_pl_pl_over_lip_lip_ratios(trajectory_slices_only_chl)
@@ -1017,7 +931,6 @@ def plot(ctx: typer.Context,
         plot_chl_pl_over_lip_lip_ratios(trajectory_slices_only_chl)
 
 
-@duration
 @app.command()
 def get(ctx: typer.Context,
         contact_types: List[str] = typer.Argument(
@@ -1041,11 +954,11 @@ def get(ctx: typer.Context,
     trajectory_slices_only_chl = [trj for trj in trajectory_slices
                                   if 'chol' in trj.system.name]
 
-    grp2_selectors = [trj.system.pl_selector()[1:-4]
-                      if 'dopc_dops50' not in trj.system.name
-                      else trj.system.pl_selector(0)[1:-4] + '///|' +
-                      trj.system.pl_selector(1)[1:-6]
-                      for trj in trajectory_slices_only_chl]
+    # grp2_selectors = [trj.system.pl_selector()[1:-4]
+    #                   if 'dopc_dops50' not in trj.system.name
+    #                   else trj.system.pl_selector(0)[1:-4] + '///|' +
+    #                   trj.system.pl_selector(1)[1:-6]
+    #                   for trj in trajectory_slices_only_chl]
 
     if 'hb_lip' in contact_types:
         logging.info('started intrabilayer hbonds calculation')
@@ -1106,7 +1019,7 @@ def get(ctx: typer.Context,
         logging.info('started contacts with water calculation')
         multiproc(calculate_contacts,
                   trajectory_slices_only_chl,
-                  ('CHOL' for _ in trajectory_slices_only_chl),
+                  ('lip' for _ in trajectory_slices_only_chl),
                   ('SOL' for _ in trajectory_slices_only_chl),
                   ('dc' for _ in trajectory_slices_only_chl),
                   (0 for _ in trajectory_slices_only_chl),

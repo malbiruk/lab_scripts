@@ -45,10 +45,10 @@ def obtain_pl_coords(trj_slices: list) -> None:
 
         for ts in u.trajectory:
             cutoff, n = leaflet.optimize_cutoff(
-                u, 'name P* or name O3', dmin=7, dmax=17)
+                u, 'name P*', dmin=7, dmax=17)
             print_1line(f'cutoff {cutoff} A, {n} groups')
             leaflet_ = leaflet.LeafletFinder(
-                u, 'name P* or name O3', pbc=True, cutoff=cutoff)
+                u, 'name P*', pbc=True, cutoff=cutoff)
             if len(leaflet_.groups()) != 2:
                 rich.print(f'{len(leaflet_.groups())} groups found...')
             leaflet_0 = leaflet_.group(0)

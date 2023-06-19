@@ -28,6 +28,49 @@ from pandas import DataFrame
 app = typer.Typer(rich_markup_mode='rich', add_completion=False)
 
 
+def get_n_chl_df(trj_slices: list):
+    '''
+    read or create file with n of PL molecules in systems
+    '''
+    n_chl_molecules_file = (PATH / 'notebooks' / 'integral_parameters' /
+                            f'n_chl_{trj_slices[0].b}-{trj_slices[0].e}-'
+                            f'{trj_slices[0].dt}.csv')
+
+    if n_chl_molecules_file.is_file():
+        n_chl_df = pd.read_csv(n_chl_molecules_file)
+
+    else:
+        logging.info('calculating n of PL molecules...')
+        n_chl_to_df = {
+            'index': [],
+            'system': [],
+            'CHL amount, %': [],
+            'timepoint': [],
+            'n_chl': []
+        }
+        for trj in trj_slices:
+            trj.generate_slice_with_gmx()
+            u = mda.Universe(
+                f'{trj.system.dir}/md/{trj.system.tpr}',
+                f'{trj.system.dir}/md/pbcmol_{trj.b}-{trj.e}-{trj.dt}.xtc')
+
+            for ts in u.trajectory:
+                chl_group = u.select_atoms('resname CHL')
+                n_chl_to_df['index'].append(trj.system.name)
+                n_chl_to_df['system'].append(
+                    trj.system.name.split('_chol', 1)[0])
+                n_chl_to_df['CHL amount, %'].append(
+                    trj.system.name.split('_chol', 1)[1]
+                    if 'chol' in trj.system.name
+                    else '0')
+                n_chl_to_df['timepoint'].append(int(ts.time))
+                n_chl_to_df['n_chl'].append(len(chl_group.residues))
+
+        n_chl_df = pd.DataFrame(n_chl_to_df)
+        n_chl_df.to_csv(n_chl_molecules_file, index=False)
+    return n_chl_df
+
+
 def contacts_system_name(system_name: str) -> str:
     '''
     reformat system name to contacts dc filename
@@ -65,14 +108,16 @@ def read_rcnames_file(trj: TrajectorySlice, prefix: str) -> DataFrame:
 
 def update_contacts_tables_single_trj(progress: dict,
                                       task_id: int,
-                                      trj: TrajectorySlice) -> None:
+                                      trj: TrajectorySlice,
+                                      list_of_prefixes=None) -> None:
     '''
     combine rchist and rcnames files for contact list for single trj
     '''
 
     logging.debug('%s...', trj.system.name)
-    list_of_prefixes = [
-        'lip_hb_hb', 'lip_SOL_hb_hb', 'CHOL_SOL_dc_dc', 'lip_dc_dc']
+    if list_of_prefixes is None:
+        list_of_prefixes = [
+            'lip_hb_hb', 'lip_SOL_hb_hb', 'CHOL_SOL_dc_dc', 'lip_dc_dc']
 
     for c, prefix in enumerate(list_of_prefixes):
         rchist_full_file = (PATH / trj.system.name / 'contacts' /
@@ -82,7 +127,11 @@ def update_contacts_tables_single_trj(progress: dict,
             logging.debug('%s file exists, skipping...', prefix)
             return
 
-        rcnames = read_rcnames_file(trj, prefix)
+        try:
+            rcnames = read_rcnames_file(trj, prefix)
+        except pd.errors.ParserError:
+            logging.error('ParserError, %s', trj)
+            return
         rchist = pd.read_csv(PATH / trj.system.name / 'contacts' /
                              f'{prefix}_rchist.csv', header=None)
 
@@ -533,30 +582,38 @@ def plot_chol_mhp_fractions_comps(trj_slices: list) -> None:
     logging.info('done.')
 
 
-def contacts_to_single_tables(trj_slices: list) -> None:
+def contacts_to_single_tables(trj_slices: list, postfix: str = '',
+                              list_of_prefixes=None) -> None:
     '''
     collect contacts (hb and dc) of CHL with PL and SOL to single tables
     containing all systems
     '''
-    list_of_prefixes = ['lip_hb_hb', 'lip_SOL_hb_hb',
-                        'CHOL_SOL_dc_dc', 'lip_dc_dc']
+    if list_of_prefixes is None:
+        list_of_prefixes = ['lip_hb_hb', 'lip_SOL_hb_hb',
+                            'CHOL_SOL_dc_dc', 'lip_dc_dc']
 
     for pr in list_of_prefixes:
         fname = (
             PATH / 'notebooks' / 'contacts' /
-            f'{pr}_{trj_slices[0].b}-{trj_slices[0].e}-{trj_slices[0].dt}'
+            f'{pr}{postfix}_{trj_slices[0].b}-{trj_slices[0].e}-'
+            f'{trj_slices[0].dt}'
             '_rchist_full.csv')
-        # if fname.is_file():
-        #     return
+        if fname.is_file():
+            return
         logging.info('saving %s contacts data...', pr)
 
         dfs = []
         for trj in trj_slices:
-            df = pd.read_csv(PATH / trj.system.name / 'contacts' /
-                             f'{pr}_rchist_full.csv')
+            try:
+                df = pd.read_csv(PATH / trj.system.name / 'contacts' /
+                                 f'{pr}_rchist_full.csv')
+            except FileNotFoundError:
+                logging.error('FileNotFoundError, %s', trj)
+                continue
             df.insert(0, 'index', trj.system.name)
             df.insert(1, 'system', trj.system.name.split('_chol', 1)[0])
-            df.insert(2, 'CHL amount, %', trj.system.name.split('_chol', 1)[1])
+            df.insert(2, 'CHL amount, %', trj.system.name.split('_chol', 1)[1]
+                      if 'chol' in trj.system.name else '0')
             dfs.append(df)
 
         df_all = pd.concat(dfs, ignore_index=True)
@@ -595,15 +652,14 @@ def create_chl_angle_z_mhp_table_for_contacts(trj_slices: list,
         PATH / 'notebooks' / 'contacts' /
         f'{pr}_{trj_slices[0].b}-{trj_slices[0].e}-{trj_slices[0].dt}'
         '_rchist_full.csv')
+    df = df[(df['dmn'] == 'CHL') | (df['amn'] == 'CHL')]
     df['chl_index'] = np.where(
         df['dmn'] == 'CHL', df['dmi'],
         np.where(df['amn'] == 'CHL', df['ami'], df['dmi']))
     df['other_index'] = np.where(
-        df['dmn'] != 'CHL', df['dmi'],
-        np.where(df['amn'] != 'CHL', df['ami'], df['ami']))
+        df['dmn'] != 'CHL', df['dmi'], df['ami'])
     df['other_name'] = np.where(
-        df['dmn'] != 'CHL', df['dmn'],
-        np.where(df['amn'] != 'CHL', df['amn'], df['amn']))
+        df['dmn'] != 'CHL', df['dmn'], df['amn'])
 
     df_dup = df.loc[df['other_name'] == 'CHL'].copy()
     (df_dup['other_index'], df_dup['chl_index']) = (
@@ -617,7 +673,7 @@ def create_chl_angle_z_mhp_table_for_contacts(trj_slices: list,
               'chl_first_index.pkl', 'rb') as f:
         chl_first_index = pickle.load(f)
     df.set_index('index', inplace=True)
-    df['chl_index'] = (df['chl_index']
+    df['chl_index'] = (df['chl_index'] + 1
                        - df['chl_index'].index.map(chl_first_index))
     df.reset_index(inplace=True)
 
@@ -705,7 +761,7 @@ def plot_contacts_per_chl_mol_by_hue(trj_slices: list,
 
     table_with_probs['n contacts per molecule'] = (
         table_with_probs['n_contacts']
-        / table_with_probs['n_chols'])
+        / table_with_probs['n_chl'])
 
     order = (['<=3', '3-6', '6-9', '9-12', '12-15', '>15']
              if hue == 'distance to bilayer center, Å'
@@ -730,7 +786,7 @@ def plot_contacts_per_chl_mol_by_hue(trj_slices: list,
                             x='other_name', y='n contacts per molecule',
                             order=['CHL', 'PL', 'SOL'],
                             hue=hue, hue_order=order, ax=axs[c],
-                            edgecolor='k', palette=palette, ci='sd'
+                            edgecolor='k', palette=palette, errorbar='sd'
                             )
                 if c != 7:
                     axs[c].legend([], [], frameon=False)
@@ -752,7 +808,7 @@ def plot_contacts_per_chl_mol_by_hue(trj_slices: list,
                         bbox_to_anchor=(0.5, -0.2), ncol=6)
         if postfix == 'hb':
             fig.suptitle(f'{exp}, hydrogen bonds')
-        elif postfix == 'hb':
+        elif postfix == 'dc':
             fig.suptitle(f'{exp}, contacts by distance (6 Å)')
         fig.savefig(
             PATH / 'notebooks' / 'contacts' / 'imgs' /
@@ -810,7 +866,7 @@ def plot_chl_pl_hbonds_groups_by_hue(trj_slices: list,
 
     table_with_probs['n contacts per molecule'] = (
         table_with_probs['n_contacts']
-        / table_with_probs['n_chols'])
+        / table_with_probs['n_chl'])
 
     hue_order = (['<=3', '3-6', '6-9', '9-12', '12-15', '>15']
                  if hue == 'distance to bilayer center, Å'
@@ -840,7 +896,7 @@ def plot_chl_pl_hbonds_groups_by_hue(trj_slices: list,
                             x='PL group', y='n contacts per molecule',
                             order=order, hue=hue, hue_order=hue_order,
                             ax=axs[c],
-                            edgecolor='k', palette=palette, ci='sd'
+                            edgecolor='k', palette=palette, errorbar='sd'
                             )
                 if c != 7:
                     axs[c].legend([], [], frameon=False)
@@ -883,18 +939,21 @@ def plot_contacts(
     - hbonds and dc
     - hue by surface, z-slices and angle components
     '''
-    trj_slices, _, verbose, _ = ctx.obj
+    trj_slices, n_workers, verbose, messages = ctx.obj
     initialize_logging('plot_contacts.log', verbose)
     sns.set(style='ticks', context='talk', palette='muted')
-    chl_indexes = pd.read_csv(PATH / 'notebooks' / 'integral_parameters' /
-                              f'chl_tilt_{trj_slices[0].b}-{trj_slices[0].e}-'
-                              f'{trj_slices[0].dt}_coords_with_comps.csv',
-                              usecols=[0, 4, 1, 2])
-    n_chols_df = chl_indexes.groupby(
-        ['system', 'CHL amount, %', 'timepoint'],
-        as_index=False)['chl_index'].count().rename(
-        columns={'chl_index': 'n_chols'}
-    )
+    list_of_prefixes = ['lip_hb_hb',
+                        'lip_SOL_hb_hb',
+                        'CHOL_SOL_dc_dc',
+                        'lip_dc_dc']
+    multiproc(create_chl_angle_z_mhp_table_for_contacts,
+              [trj_slices] * len(list_of_prefixes),
+              list_of_prefixes,
+              n_workers=n_workers,
+              messages=messages,
+              descr='processing contact tables')
+
+    n_chols_df = get_n_chl_df(trj_slices)
     for hbonds in [True, False]:
         postfix, df = merge_hb_or_dc_tables(trj_slices, hbonds)
         for hue in ['surface', 'tilt component',
@@ -967,21 +1026,12 @@ def update_contacts_tables(ctx: typer.Context):
     initialize_logging('upd_ct.log', verbose)
     multiproc(update_contacts_tables_single_trj,
               trj_slices,
+              [None] * len(trj_slices),
               show_progress='multiple',
               n_workers=n_workers,
               messages=messages,
               descr='updating contact tables')
     contacts_to_single_tables(trj_slices)
-    list_of_prefixes = ['lip_hb_hb',
-                        'lip_SOL_hb_hb',
-                        'CHOL_SOL_dc_dc',
-                        'lip_dc_dc']
-    multiproc(create_chl_angle_z_mhp_table_for_contacts,
-              [trj_slices] * len(list_of_prefixes),
-              list_of_prefixes,
-              n_workers=n_workers,
-              messages=messages,
-              descr='processing contact tables')
 
 
 @app.callback()
