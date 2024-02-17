@@ -261,7 +261,7 @@ def plot_mhp_ratio_all(trj_slices, chol: bool = False):
         ax.set_xticks(ticks)
         ax.set_xticklabels(labels, rotation=45,
                            ha='right', rotation_mode='anchor')
-        ax.set_ylim(0, df.phil.max()+df.phil_std.max())
+        ax.set_ylim(0, df.phil.max() + df.phil_std.max())
     axs[0].set_ylabel('% of area')
     fig.legend(loc='upper center', bbox_to_anchor=(0.5, -0.1), ncol=n)
 
@@ -494,6 +494,57 @@ def calc_fractions_chol(trj_slices: list) -> None:
     logging.info('done.')
 
 
+def calc_fractions_pl(trj_slices: list) -> None:
+    '''
+    calculate mhp fractions of pl all systems and save them as csv
+    '''
+    logging.info('getting detailed mhp data...')
+    get_detailed_mhp_data(trj_slices)
+
+    logging.info('loading data...')
+    df = pd.read_csv(PATH / 'notebooks' / 'mhpmaps' / 'info_mhp_atoms_'
+                     f'{trj_slices[0].b}-{trj_slices[0].e}-'
+                     f'{trj_slices[0].dt*10}.csv',
+                     usecols=[1, 2, 3, 4, 5, 9])
+
+    logging.info('calculating fractions...')
+    df_chol = df[df['mol_name'].isin(
+        ['DMPC', 'DPPC', 'DSPC', 'POPC', 'DOPC', 'DOPS'])].copy()
+
+    df_chol['phob'] = df_chol['mhp'] >= 0.5
+    df_chol['phil'] = df_chol['mhp'] <= -0.5
+    df_chol['neutr'] = (-0.5 < df_chol['mhp']) & (df_chol['mhp'] < 0.5)
+
+    for_hists_fractions_chol = df_chol.groupby(
+        ['index', 'system', 'CHL amount, %', 'timepoint'], as_index=False
+    )[['phob', 'phil', 'neutr']].agg(lambda x: np.sum(x) / len(x))
+
+    for_hists_fractions_chol.to_csv(
+        PATH / 'notebooks' / 'mhpmaps' /
+        'for_hists_fractions_pl_'
+        f'{trj_slices[0].b}-{trj_slices[0].e}-{trj_slices[0].dt}.csv',
+        index=False)
+
+    for_hists_fractions_stats_chol = (
+        for_hists_fractions_chol.groupby(
+            ['index', 'system', 'CHL amount, %'], as_index=False).agg(
+            phob=('phob', 'mean'),
+            phil=('phil', 'mean'),
+            neutr=('neutr', 'mean'),
+            phob_std=('phob', 'std'),
+            neutr_std=('neutr', 'std'),
+            phil_std=('phil', 'std'),
+        ))
+
+    for_hists_fractions_stats_chol.to_csv(
+        PATH / 'notebooks' / 'mhpmaps' /
+        'for_hists_fractions_stats_pl_'
+        f'{trj_slices[0].b}-{trj_slices[0].e}-{trj_slices[0].dt}.csv',
+        index=False)
+
+    logging.info('done.')
+
+
 def calc_chol_surf_fractions(trj_slices: list) -> None:
     '''
     calculate fraction of cholesterol on surface for all systems
@@ -657,6 +708,11 @@ def calculate_mhp_clusters(trj_slices: list) -> None:
         with progress_bar as p:
             task_id = p.add_task('mhp clusterization', total=len(trj_slices))
             for trj in trj_slices:
+                if (PATH / 'notebooks' / 'mhpmaps' / 'clust' /
+                           f'{trj.system.name}_{trj.b}-{trj.e}-'
+                           f'{trj.dt}_{option}_lt.txt').is_file():
+                    p.update(task_id, advance=1)
+                    continue
                 nmp_file = (PATH / trj.system.name /
                             f'mhp_{trj.b}-{trj.e}-{trj.dt}' / '1_data.nmp')
 
@@ -840,6 +896,8 @@ def plot_mhp_hists_single_exp(progress: dict, task_id: int,
         f'{trj_slices[0].dt*10}.png',
         bbox_inches='tight', dpi=300)
 
+    # TODO: add pl kdeplot
+
 
 @app.command()
 def get(ctx: typer.Context,
@@ -904,6 +962,10 @@ def area_fractions(
 
     if 'chol_all' in fraction_types:
         chol_all(trajectory_slices, calculate, plot, stat)
+
+    if 'mhp_pl' in fraction_types:
+        calc_fractions_pl(trajectory_slices)
+        ## TODO: add plot later
 
 
 @ app.command()
@@ -1015,10 +1077,30 @@ if __name__ == '__main__':
 
 
 # %%
-# systems = flatten([(i, i + '_chol10', i + '_chol30', i + '_chol50')
+# verbose=False
+# initialize_logging('chl_mhp_phob_def.log', )
+# systems = flatten([(i + '_chol10', i + '_chol30', i + '_chol50')
 #                    for i in flatten(EXPERIMENTS.values())])
 # systems = list(dict.fromkeys(systems))
+# trajectory_slices = [TrajectorySlice(System(PATH, s, xtc, tpr), b, e, dt)
+#                      for s in systems]
 # trajectory_slices = [TrajectorySlice(System(
 #     PATH, s, 'pbcmol_201.xtc', '201_ns.tpr'),
 #     200.0, 201.0, 1) for s in systems]
 # trj_slices = trajectory_slices
+
+
+# %%
+
+# %%
+# for trj in trj_slices
+
+
+# %%
+# h = np.array(hydroph_neighbor_ratios)
+# h.mean()
+# h.std()
+# # %%
+# plt.imshow(labeled_mask)
+# for contour in contours:
+#     plt.plot(contour[:, 1], contour[:, 0], c='white', ls='-', lw=1)

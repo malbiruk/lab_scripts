@@ -673,7 +673,7 @@ def create_chl_angle_z_mhp_table_for_contacts(trj_slices: list,
               'chl_first_index.pkl', 'rb') as f:
         chl_first_index = pickle.load(f)
     df.set_index('index', inplace=True)
-    df['chl_index'] = (df['chl_index'] + 1
+    df['chl_index'] = (df['chl_index']
                        - df['chl_index'].index.map(chl_first_index))
     df.reset_index(inplace=True)
 
@@ -1087,36 +1087,3 @@ if __name__ == '__main__':
 #     200.0, 201.0, 1) for s in systems]
 #
 # trj = trj_slices[10]
-
-# %% RDF
-# systs = ['popc_chol10', 'popc_chol30', 'popc_chol50']
-# syst=systs[0]
-#
-# fig, axs = plt.subplots(1, 3, figsize=(20, 7),
-#                         sharex=True, sharey=True)
-# for ax, syst in zip(axs, systs):
-#     df_n = pd.read_csv(PATH / syst / 'a' / 'N_rdf.csv')
-#     df_p = pd.read_csv(PATH / syst / 'a' / 'P_rdf.csv')
-#     ax.plot(df_n['# r'], df_n['g'], label='N')
-#     ax.plot(df_p['# r'], df_p['g'], label='P')
-#     ax.set_xlabel('distance to CHL O, Å')
-#     sname, chl = syst.split('_chol', 1)
-#     ax.set_title(f'{sname}, {chl}% CHL')
-# axs[0].set_ylabel('g(r)')
-# axs[1].legend(loc='upper center', bbox_to_anchor=(0.5, -0.15), ncol=3)
-#
-#
-# # %%
-# fig.savefig(PATH / 'notebooks' / 'rdf' / 'popc_P_N_chl_O.png',
-# bbox_inches='tight', dpi=300)
-
-
-# # %%
-# df = pd.read_csv(PATH / 'notebooks' / 'integral_parameters' /
-#                  'angle_mhp_z_'
-#                  f'{trj_slices[0].b}-{trj_slices[0].e}-{trj_slices[0].dt}.csv')
-#
-#
-# # %%
-# df[df['system'] == 'dops'].groupby(
-#     ['system', 'CHL amount, %'], as_index=False)['timepoint'].nunique()

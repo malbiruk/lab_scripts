@@ -11,6 +11,7 @@ analysis of SOL inside bilayer: n and lt of hbonds with CHL and PL
 
 import logging
 
+import matplotlib.pyplot as plt
 import MDAnalysis as mda
 import numpy as np
 import pandas as pd
@@ -102,6 +103,69 @@ def obtain_sol_indices_inside_bilayer(
               index=False)
 
 
+def get_sol_indexes_df(trj_slices):
+    sol_indexes_file = (PATH / 'notebooks' / 'contacts' /
+                        f'sol_in_bilayer_dt{trj_slices[0].dt}.csv')
+    if not sol_indexes_file.is_file():
+        multiproc(obtain_sol_indices_inside_bilayer,
+                  trj_slices,
+                  n_workers=len(trj_slices),
+                  show_progress='multiple',
+                  descr='sol ind')
+        dfs = [pd.read_csv(
+            PATH / 'tmp' / f'{trj.system.name}_sol_ins_bilayer.csv')
+            for trj in trj_slices]
+        for i, trj in zip(dfs, trj_slices):
+            i['index'] = trj.system.name
+        sol_indexes = pd.concat(dfs, ignore_index=True)
+        sol_indexes.to_csv(sol_indexes_file, index=False)
+    else:
+        sol_indexes = pd.read_csv(sol_indexes_file)
+    return sol_indexes
+
+
+def plot_intrabilayer_sol_perc(merged_df, trj_slices):
+    df_prob = merged_df.groupby(
+        ['system', 'CHL amount, %', 'timepoint', 'other_name'],
+        as_index=False)['dmi'].count().rename(
+        columns={'dmi': 'n_hbonds'}
+    )
+    df_sum = merged_df.groupby(['system', 'CHL amount, %', 'timepoint'],
+                               as_index=False)['dmi'].count().rename(
+        columns={'dmi': 'n_hbonds_sum'})
+    df_prob = df_prob.merge(df_sum, on=['system', 'CHL amount, %', 'timepoint'],
+                            how='left')
+    df_prob['% of SOL'] = (df_prob['n_hbonds']
+                           / df_prob['n_hbonds_sum'] * 100)
+
+    for exp, systs in EXPERIMENTS.items():
+        fig, axs = plt.subplots(1, 3, figsize=(20, 7), sharey=True)
+        for ax, syst in zip(axs, systs):
+            data = df_prob[df_prob['system'] == syst]
+            sns.barplot(data=data,
+                        x='other_name', y='% of SOL',
+                        hue='CHL amount, %',
+                        order=['PL', 'CHL'], ax=ax,
+                        edgecolor='k', palette='RdYlGn_r', errorbar='sd'
+                        )
+            if ax != axs[1]:
+                ax.legend([], [], frameon=False)
+            ax.set_xlabel('contacting molecule')
+            ax.set_ylim(0)
+            ax.set_title(syst)
+            if ax != axs[0]:
+                ax.set_ylabel('')
+        sns.move_legend(axs[1], loc='upper center',
+                        bbox_to_anchor=(0.5, -0.2), ncol=6)
+        fig.suptitle(exp)
+        fig.patch.set_facecolor('white')
+        fig.savefig(
+            PATH / 'notebooks' / 'contacts' / 'imgs' /
+            f'{exp}_intrabilayer_sol_perc_'
+            f'dt{trj_slices[0].dt}.png',
+            bbox_inches='tight', dpi=300)
+
+
 def main():
     '''
     analysis of SOL inside bilayer: n and lt of hbonds with CHL and PL
@@ -115,22 +179,31 @@ def main():
         PATH, s, 'pbcmol_201.xtc', '201_ns.tpr'),
         200.0, 201.0, 1) for s in systems]
 
-    multiproc(obtain_sol_indices_inside_bilayer,
-              trj_slices,
-              n_workers=len(trj_slices),
-              show_progress='multiple',
-              descr='sol ind')
-
-    # concatenate in single table
-    # obtain hbonds info
+    logging.info('loading data...')
+    sol_indexes = get_sol_indexes_df(trj_slices)
+    sol_indexes.rename(columns={'timestep': 'timepoint',
+                                'SOL index': 'dmi'}, inplace=True)
     lip_sol_rchist_full = pd.read_csv(PATH / 'notebooks' / 'contacts' /
                                       'lip_SOL_hb_hb_full_'
                                       f'{trj_slices[0].b}-{trj_slices[0].e}'
                                       f'-{trj_slices[0].dt}_'
                                       'rchist_full.csv')
 
+    logging.info('processing data...')
+    merged_df = sol_indexes.merge(
+        lip_sol_rchist_full,
+        on=['index', 'timepoint', 'dmi'],
+        how='inner')
+
+    merged_df['other_name'] = merged_df['amn']
+    merged_df.loc[merged_df['amn'].str.endswith(
+        ('PC', 'PS')), 'other_name'] = 'PL'
+
+    logging.info('plotting...')
+    plot_intrabilayer_sol_perc(merged_df, trj_slices)
 
 
 # %%
+
 if __name__ == '__main__':
     main()

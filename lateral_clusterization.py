@@ -229,12 +229,6 @@ def plot_cluster_sizes(trj_slices: list, mol: str,
                         f'{trj_slices[0].dt}_thresh_{thresh}'
                         + '_'.join(exp.split()) + '.png'),
                     bbox_inches='tight')
-        fig.suptitle(f'{exp}, threshold={thresh} Å')
-        fig.savefig(PATH / 'notebooks' / 'gclust' /
-                    str(f'{mol}_clusters_{trj_slices[0].b}-{trj_slices[0].e}-'
-                        f'{trj_slices[0].dt}_thresh_{thresh}'
-                        + '_'.join(exp.split()) + '.png'),
-                    bbox_inches='tight')
     rich.print('done.')
 
 

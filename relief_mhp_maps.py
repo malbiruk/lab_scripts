@@ -233,10 +233,10 @@ def main(
     tpr: str = typer.Option(
         '201_ns.tpr', '-tpr', help='name of topology files',
         rich_help_panel='Trajectory parameters'),
-    b: int = typer.Option(
+    b: float = typer.Option(
         200, '-b', help='beginning of trajectories (in ns)',
         rich_help_panel='Trajectory parameters'),
-    e: int = typer.Option(
+    e: float = typer.Option(
         201, '-e', help='end of trajectories (in ns)',
         rich_help_panel='Trajectory parameters'),
     dt: int = typer.Option(
@@ -251,6 +251,8 @@ def main(
     sns.set(style='ticks', context='talk', palette='muted')
     initialize_logging('mhp_relief.log')
 
+    systems = ['dopc', 'dops']
+
     for system in systems:
         trj_slices = [TrajectorySlice(
             System(PATH, s, xtc, tpr), b, e, dt)
@@ -258,7 +260,7 @@ def main(
 
         with progress_bar as p:
             for trj in p.track(trj_slices):
-                obtain_mhpmap(trj, False , 75)
+                obtain_mhpmap(trj, False, 75)
                 obtain_relief(trj, False)
 
         plot_mhp_relief_chol(trj_slices)
@@ -288,4 +290,36 @@ if __name__ == '__main__':
 # fig.savefig(
 #     PATH / 'notebooks' / 'mhpmaps' / 'imgs' /
 #     f'popc_chol_mhp_hist_{ts}.png',
+#     bbox_inches='tight', dpi=300)
+
+
+# %%
+# trj = TrajectorySlice(System(
+#     PATH, 'dops_chol30', 'pbcmol_201.xtc', '201_ns.tpr'
+# ), 200.0, 201.0, 1)
+#
+#
+# # %%
+#
+# data = np.load(
+#     PATH / trj.system.name /
+#     f'mhp_{trj.b}-{trj.e}-{trj.dt}' / '1_data.nmp')['data'][0]
+#
+# # %%
+# sns.set(style='ticks', context='talk', palette='muted')
+# fig, ax = plt.subplots(figsize=(7, 7))
+# mh = plot_mhpmap(data, ax,
+#                  lev=2, bside=75, title='', resolution=150,
+#                  cbar=False)
+#
+# cax2 = fig.add_axes([0.95, 0.125, 0.03, 0.75])
+# clb2 = fig.colorbar(mh, cax=cax2,
+#                     ticks=[-2, -(2 / 2), 0, 2 / 2, 2],
+#                     shrink=0.7)
+#
+# clb2.ax.set_ylabel('MГП, log P', rotation=270, labelpad=10)
+# fig.patch.set_facecolor('white')
+# fig.savefig(
+#     PATH / 'notebooks' / 'mhpmaps' / 'imgs' /
+#     f'dops_chol30_mhpmap_200ns.png',
 #     bbox_inches='tight', dpi=300)

@@ -543,7 +543,9 @@ def plot(
     to_plot: List[str] = typer.Argument(
         ..., help='what to plot. available values: '
         'hb_n_chl_per_pl, hb_n_sol_per_pl, '
-        'hb_lt_chl_sol_over_lip_sol, hb_lt_pl_sol_over_lip_sol')):
+        'hb_lt_chl_sol_over_lip_sol, hb_lt_pl_sol_over_lip_sol'),
+    all: bool = typer.Option(
+        False, help='run all options')):
     '''
     plot contacts
     '''
@@ -579,10 +581,14 @@ def plot(
         'hb_chl_perc': [
             (chl_percentage_hbonds_interactors, (trajectory_slices,))],
     }
-
-    for task in to_plot:
-        for func, arguments in to_exec[task]:
-            func(*arguments)
+    if all:
+        for _, vals in to_exec.items():
+            for func, arguments in vals:
+                func(*arguments)
+    else:
+        for task in to_plot:
+            for func, arguments in to_exec[task]:
+                func(*arguments)
 
 
 @ app.callback()

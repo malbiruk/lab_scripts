@@ -643,6 +643,7 @@ for c, i in enumerate([10, 30, 50]):
 
 
 # %%
+fig.patch.set_facecolor('white')
 fig.savefig(PATH / 'notebooks' / 'chol_tilt' / f'{syst}_comps_comparison.png',
             bbox_inches='tight', dpi=300)
 

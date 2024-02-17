@@ -3,7 +3,9 @@ this script calculates scd of PL contacting with CHL and not contacting
 '''
 import logging
 import subprocess
+from pathlib import Path
 
+import matplotlib.pyplot as plt
 import MDAnalysis as mda
 import numpy as np
 import pandas as pd
@@ -20,19 +22,30 @@ def run_scd_py(trj: TrajectorySlice, selection: str, postfix: str) -> None:
     calculates per atom Scd values for whole trajectory part
     for molecules in selection
     '''
+    if (PATH / 'notebooks' / 'scd' / 'near_chl' /
+            f'{trj.system.name}_{postfix}_{trj.b}-{trj.e}-0_scd.csv').is_file():
+        return
+
     cmd = ['/nfs/belka2/soft/impulse/dev/inst/scd.py',
            f'-f {trj.system.dir}/md/{trj.system.xtc}',
            f'-s {trj.system.dir}/md/{trj.system.tpr}',
            f'-o {trj.system.path}/notebooks/scd/near_chl/'
-           f'{trj.system.name}_{postfix}_{trj.b*1000}-{trj.e*1000}-{trj.dt}',
-           f'-b {trj.b*1000} -e {trj.e*1000} --dt {trj.dt} '
+           f'{trj.system.name}_{postfix}_{trj.b}-{trj.e}-{trj.dt}',
+           f'-b {trj.b} -e {trj.e} --dt {trj.dt} '
            f'--sel {selection}']
     # logging.info(
     #     'calculating Scd for %s, '
     #     '%s-%s ns, dt=%s ps...',
     #     trj.system.name, trj.b, trj.e, trj.dt)
 
-    subprocess.run(' '.join(cmd), shell=True, check=True)
+    if len(selection[1:-2].split(',')) < 2:
+        return
+
+    try:
+        subprocess.run(' '.join(cmd), shell=True, check=True)
+    except subprocess.CalledProcessError:
+        logging.error('SubprocessError: %s',
+                      f'{trj.system.name}_{postfix}_{trj.b}-{trj.e}-{trj.dt}')
 
 
 def calculate_scd(trj: TrajectorySlice,
@@ -42,13 +55,13 @@ def calculate_scd(trj: TrajectorySlice,
     for each timestep corresponding selection
     '''
     trj_list = [TrajectorySlice(trj.system, fr, fr, 0)
-                for fr in range(int(trj.b), int(trj.e), trj.dt)]
+                for fr in range(int(trj.b * 1000), int(trj.e * 1000), trj.dt)]
     multiproc(run_scd_py, trj_list, selections,
               (postfix for _ in trj_list),
               n_workers=20)
 
 
-def scd_summary(trj_slices: list, postfix: str) -> None:
+def scd_summary(trj_slices: list, postfix: str) -> pd.DataFrame:
     '''
     aggregates data from individual _scd.csv files to single file
     '''
@@ -66,9 +79,13 @@ def scd_summary(trj_slices: list, postfix: str) -> None:
         scd_files = [
             str(scd_folder / 'near_chl' /
                 f'{trj.system.name}_{postfix}_{i}-{i}-0_scd.csv')
-            for i in range(trj.b * 1000, trj.e * 1000, trj.dt)]
+            for i in range(int(trj.b * 1000), int(trj.e * 1000), trj.dt)]
         for file in scd_files:
-            lines = opener(file)
+            try:
+                lines = opener(file)
+            except FileNotFoundError:
+                logging.error('FileNotFound: %s', Path(file).name)
+                continue
             systems.extend([trj.system.name for i in range(
                 len(lines[1].split(',')) + len(lines[5].split(',')))])
             time = file.split('-')[1].split('_')[0]
@@ -114,18 +131,74 @@ def generate_selections(trj, lip_dc, n_pl_df):
     return prefixes_near_chol, prefixes_not_near_chol
 
 
+def plot_scd_near_chl(trj_slices):
+    df_near_chol = pd.read_csv(PATH / 'notebooks' / 'scd' / 'near_chl' /
+                               f'scd_near_chl_dt{trj_slices[0].dt}.csv')
+    df_not_near_chol = pd.read_csv(PATH / 'notebooks' / 'scd' / 'near_chl' /
+                                   f'scd_not_near_chl_dt{trj_slices[0].dt}.csv')
+    df_near_chol['near_chol'] = 'yes'
+    df_not_near_chol['near_chol'] = 'no'
+    df = pd.concat([df_near_chol, df_not_near_chol], ignore_index=True)
+
+    def dfol(
+            df: pd.DataFrame, system: str,
+            chain: str, chl_amount: int) -> pd.DataFrame:
+        '''
+        extract data for one line in plot from df
+        '''
+        return df[(df['system'] == system)
+                  & (df['chain'] == chain)
+                  & (df['CHL amount, %'] == chl_amount)]
+
+    df['atom_n'] = df['atom'].apply(lambda x: int(x[2:]))
+    scd_ms = df.drop(columns=['timepoint', 'atom']).groupby(
+        ['system', 'CHL amount, %', 'chain', 'atom_n', 'near_chol'],
+        as_index=False).agg(['mean', 'std'])
+    scd_ms = scd_ms.reset_index(level=1).reset_index(
+        level=1).reset_index(level=1).reset_index()
+
+    for syst in scd_ms['system'].unique():
+        fig, axs = plt.subplots(1, 3, figsize=(20, 7),
+                                sharex=True, sharey=True)
+        for ax, chl_amount in zip(axs, scd_ms['CHL amount, %'].unique()):
+            for c, near_chol in enumerate(scd_ms['near_chol'].unique()):
+                scd_ms_part = scd_ms[scd_ms['near_chol'] == near_chol]
+                for sn, ls in zip(('sn-1', 'sn-2'),
+                                  ('-', '--')):
+                    subdf = dfol(scd_ms_part, syst, sn, chl_amount)
+                    ax.errorbar(
+                        x=subdf['atom_n'],
+                        y=subdf['scd']['mean'],
+                        yerr=subdf['scd']['std'],
+                        ls=ls, color=f'C{c}',
+                        elinewidth=1, label=f'{sn}, '
+                        f'contacts with CHL: {near_chol}'
+                    )
+            ax.set_title(f'{chl_amount} % CHL')
+            ax.set_xlabel('C atom number')
+        fig.suptitle(syst)
+        axs[0].set_ylabel('Scd')
+        handles, labels = axs[0].get_legend_handles_labels()
+        fig.legend(handles, labels,
+                   loc='upper center', bbox_to_anchor=(0.5, 0), ncol=2)
+        fig.savefig(PATH / 'notebooks' / 'scd' / 'res' /
+                    'scd_near_chl_'
+                    f'{syst}_{trj_slices[0].b}-{trj_slices[0].e}-'
+                    f'{trj_slices[0].dt}.png',
+                    bbox_inches='tight', dpi=300)
+
+
 def main():
     '''
     analysis of SOL inside bilayer: n and lt of hbonds with CHL and PL
     '''
     sns.set(style='ticks', context='talk', palette='muted')
     initialize_logging('scd_near_chl.log', False)
-    systems = flatten([(i + '_chol10', i + '_chol30', i + '_chol50')
-                       for i in ['dopc', 'dops']])
+    systems = flatten([(i, i + '_chol10', i + '_chol30', i + '_chol50')
+                       for i in ['popc', 'dmpc','dopc','dops']])
     systems = list(dict.fromkeys(systems))
     trj_slices = [TrajectorySlice(System(
-        PATH, s, 'pbcmol_201.xtc', '201_ns.tpr'),
-        200.0, 201.0, 1) for s in systems]
+        PATH, s), 200.0, 201.0, 1) for s in systems]
 
     logging.info('loading data...')
     n_pl_df = get_n_pl_df(trj_slices)
@@ -140,97 +213,22 @@ def main():
         calculate_scd(trj, near_chl, 'near_chl')
         calculate_scd(trj, not_near_chl, 'not_near_chl')
 
-    scd_summary(trj_slices, 'near_chl')
-    scd_summary(trj_slices, 'not_near_chl')
+    scd_summary(trj_slices, 'near_chl').to_csv(
+        PATH / 'notebooks' / 'scd' / 'near_chl' /
+        f'scd_near_chl_dt{trj_slices[0].dt}.csv',
+        index=False
+    )
+    scd_summary(trj_slices, 'not_near_chl').to_csv(
+        PATH / 'notebooks' / 'scd' / 'near_chl' /
+        f'scd_not_near_chl_dt{trj_slices[0].dt}.csv',
+        index=False
+    )
+    logging.info('plotting...')
+    plot_scd_near_chl(trj_slices)
     logging.info('done.')
 
 
-
-# %%
 if __name__ == '__main__':
     main()
 
-
-# %%
-
-
-
-# %%
-
-
-# %%
-
-
-# def plot_scd_atoms(trj_slices: list[TrajectorySlice]) -> None:
-#     '''
-#     plot per atom scd data for each system (different amount of CHL),
-#     one file per experiment.
-#     '''
-#     def dfol(
-#             df: pd.DataFrame, system: str,
-#             chain: str, chl_amount: int) -> pd.DataFrame:
-#         '''
-#         extract data for one line in plot from df
-#         '''
-#         return df[(df['system'] == system)
-#                   & (df['chain'] == chain)
-#                   & (df['CHL amount, %'] == chl_amount)]
-#
-#     def scd_plot(scd_ms: pd.DataFrame, exp: str,
-#                  systs: tuple, rus: bool) -> None:
-#         '''
-#         plot scd data of one experiment
-#         '''
-#         out = '_rus' if rus else ''
-#         chls = 'ХС' if rus else 'CHL'
-#         scd_ms_part = scd_ms[scd_ms['system'].str.fullmatch('|'.join(systs))]
-#         fig, axs = plt.subplots(1, 3, figsize=(
-#             21, 7), sharex=True, sharey=True)
-#         for s,  ax in zip(systs, axs):
-#             for c, chl in enumerate((0, 10, 30, 50)):
-#                 for sn, ls in zip(('sn-1', 'sn-2'),
-#                                   ('-', '--')):
-#                     ax.errorbar(x=dfol(scd_ms_part, s, sn, chl)['atom_n'],
-#                                 y=dfol(scd_ms_part, s, sn, chl)['scd']['mean'],
-#                                 yerr=dfol(scd_ms_part, s, sn, chl)[
-#                         'scd']['std'],
-#                         ls=ls, color=sns.color_palette('cubehelix')[c],
-#                         elinewidth=1, label=f'{chl} % {chls}, {sn}'
-#                     )
-#             s = TO_RUS[s] if rus else s
-#             ax.set_title(s)
-#             if rus:
-#                 ax.set_xlabel('Номер атома углерода')
-#             else:
-#                 ax.set_xlabel('C atom number')
-#         axs[0].set_ylabel('Scd')
-#         handles, labels = axs[0].get_legend_handles_labels()
-#         fig.legend(handles, labels,
-#                    loc='upper center', bbox_to_anchor=(0.5, -0.1), ncol=4)
-#         if rus:
-#             fig.suptitle(TO_RUS[exp])
-#         else:
-#             fig.suptitle(exp)
-#         plt.savefig(trj_slices[0].system.path / 'notebooks' / 'integral_parameters' /
-#                     f'{"_".join(exp.split())}_'
-#                     f'scd_{trj_slices[0].b}_{trj_slices[0].e}_{trj_slices[0].dt}{out}.png',
-#                     bbox_inches='tight')
-#         plt.close()
-#
-#     path, b, e, dt = trj_slices[0].system.path, trj_slices[0].b, trj_slices[0].e, trj_slices[0].dt
-#     df = pd.read_csv(path / 'notebooks' /
-#                      'integral_parameters' / f'scd_{b}-{e}-{dt}.csv')
-#     df['atom_n'] = df['atom'].apply(lambda x: int(x[2:]))
-#     # df.sort_values(['system', 'CHL amount, %', 'chain', 'atom_n'], inplace=True)
-#     scd_ms = df.drop(columns=['timepoint', 'atom']).groupby(
-#         ['system', 'CHL amount, %', 'chain', 'atom_n'],
-#         as_index=False).agg(['mean', 'std'])
-#     scd_ms = scd_ms.reset_index(level=1).reset_index(
-#         level=1).reset_index(level=1).reset_index()
-#
-#     print('plotting scd by experiment...')
-#
-#     for exp, systs in EXPERIMENTS.items():
-#         scd_plot(scd_ms, exp, systs, False)
-#         scd_plot(scd_ms, exp, systs, True)
-#     print('done.')
+# TODO: все поломалось, как-то обновить алгоритм

@@ -9,7 +9,7 @@ import pandas as pd
 import matplotlib.pyplot as plt
 import seaborn as sns
 from matplotlib import axes
-from scipy import integrate
+from scipy import integrate, stats
 from scipy.optimize import curve_fit
 import MDAnalysis as mda
 
@@ -222,3 +222,75 @@ def chl_tilt_angle(trj_slices: list[TrajectorySlice], no_comps=False) -> None:
         plot_violins(path / 'notebooks' / 'integral_parameters' / 'chl_tilt_to_plot.csv',
                      'α, °')
     print('done.')
+
+
+def plot_comps(syst: str, ax, n_comps: int = 4):
+    lines = opener(PATH / 'notebooks' / 'chol_tilt' /
+                   f'{syst}_100-200-100_tilt.xvg')
+    a = list(map(float, flatten([i.split()[1:] for i in lines])))
+    a = np.array([i if i <= 90 else i - 180 for i in a])
+
+    def func(x, *params):
+        y = np.zeros_like(x)
+        for i in range(0, len(params), 3):
+            ctr = params[i]
+            amp = params[i + 1]
+            wid = params[i + 2]
+            y = y + amp * np.exp(-((x - ctr) / wid)**2)
+        return y
+
+    x = np.arange(np.min(a), np.max(a),
+                  (np.max(a) - np.min(a)) / 500)
+    my_kde = sns.kdeplot(a,
+                         ax=ax,
+                         # fill=False,
+                         lw=0,
+                         color='black',
+                         # element='poly',
+                         # stat='density',
+                         bw_adjust=0.4,
+                         cut=0
+                         )
+    line = my_kde.lines[0]
+    x, y = line.get_data()
+
+    if n_comps == 4:
+        guess = [-20, 0.005, 10, -15, 0.02, 7, 10, 0.02, 7, 20, 0.005, 10]
+    elif n_comps == 2:
+        guess = [-20, 0.005, 10, 20, 0.005, 10]
+
+    popt, _, _, _, _ = curve_fit(func, x, y, p0=guess, full_output=True)
+    df = pd.DataFrame(popt.reshape(int(len(guess) / 3), 3),
+                      columns=['ctr', 'amp', 'wid'])
+    df['area'] = df.apply(lambda row: integrate.quad(func, np.min(
+        x), np.max(x), args=(row['ctr'], row['amp'], row['wid']))[0], axis=1)
+    fit = func(x, *popt)
+
+    sns.histplot(a,
+                 # fill=False,
+                 ax=ax,
+                 lw=0,
+                 element='poly',
+                 stat='density',
+                 alpha=0.2,
+                 edgecolor='black'
+                 )
+
+    ax.plot(x, fit, '-k', lw=2)
+    if n_comps == 4:
+        ax.plot(x, func(x, *popt[:3]), '--')
+        ax.plot(x, func(x, *popt[3:6]), '--')
+        ax.plot(x, func(x, *popt[6:9]), '--')
+        ax.plot(x, func(x, *popt[9:]), '--')
+    elif n_comps == 2:
+        ax.plot(x, func(x, *popt[:3]), '--')
+        ax.plot(x, func(x, *popt[3:6]), '--')
+    ax.set_xlabel('ɑ, °')
+    if n_comps == 4:
+        ax.set_title(f'{syst}, 2 components')
+    elif n_comps == 2:
+        ax.set_title(f'{syst}, 1 component')
+    ks_stat, p_val = stats.kstest(y, func(x, *popt))
+    ax.text(0.62, 0.88,
+            f'KS stat={round(ks_stat,3)}\np-value={"%.1E" % p_val}',
+            size=15, transform=ax.transAxes)

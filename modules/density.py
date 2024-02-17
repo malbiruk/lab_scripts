@@ -122,7 +122,8 @@ def plot_density_profile(ax,
                          trj: TrajectorySlice,
                          groups: list = None,
                          color: str = None,
-                         label: str = None) -> None:
+                         label: str = None,
+                         **kwargs) -> None:
     '''
     plot density profile of system on single axes
     '''
@@ -148,9 +149,9 @@ def plot_density_profile(ax,
         x_ = np.linspace(x.min(), x.max(), 500)
         y_ = x_y_spline(x_)
         if label is None:
-            ax.plot(x_, y_, label=gr, color=color)
+            ax.plot(x_, y_, label=gr, color=color, **kwargs)
         else:
-            ax.plot(x_, y_, label=f'{label}', color=color)
+            ax.plot(x_, y_, label=f'{label}', color=color, **kwargs)
         ax.set_xlabel('Z, nm')
         ax.set_ylabel('Density, kg/m³')
 
