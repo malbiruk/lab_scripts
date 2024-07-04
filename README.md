@@ -1,0 +1,1 @@
+This is pretty unorganized collection of scripts I created and used during my Bachelor's thesis "The role of cholesterol in the dimerization of the ErbB2 transmembrane domain" and Master's thesis “The effect of cholesterol on “mosaic” nature of the lipid bilayer surface”, performed in Laboratory of Biomolecular Modeling (IBKh RAS), 2019-2023.
